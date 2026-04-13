@@ -56,7 +56,7 @@ export const isLanguage = (value: unknown): value is Language => {
 /**
  * Create root-level locale signal with persistence
  */
-const [locale, setLocaleSignal] = createRoot(() => createSignal<Language>("en"));
+const [locale, setLocaleSignal] = createRoot(() => createSignal<Language>("fr"));
 
 /**
  * Get current locale
@@ -68,8 +68,8 @@ export const currentLocale = (): Language => locale();
  */
 export const setLocale = (newLocale: Language) => {
   if (!isLanguage(newLocale)) {
-    console.warn(`Invalid locale: ${newLocale}, falling back to "en"`);
-    newLocale = "en";
+    console.warn(`Invalid locale: ${newLocale}, falling back to "fr"`);
+    newLocale = "fr";
   }
 
   setLocaleSignal(newLocale);
@@ -127,7 +127,7 @@ export const t = (key: string, localeOverride?: Language, params?: Record<string
  */
 export const initLocale = (): Language => {
   if (typeof window === "undefined") {
-    return "en";
+    return "fr";
   }
 
   try {
@@ -144,8 +144,8 @@ export const initLocale = (): Language => {
   }
 
   if (typeof document !== "undefined") {
-    document.documentElement.setAttribute("lang", "en");
+    document.documentElement.setAttribute("lang", "fr");
   }
 
-  return "en";
+  return "fr";
 };

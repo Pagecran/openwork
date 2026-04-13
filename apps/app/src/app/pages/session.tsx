@@ -304,6 +304,7 @@ function describePermissionRequest(permission: PendingPermission | null) {
 }
 
 export default function SessionView(props: SessionViewProps) {
+  const DISABLE_AUTOMATIC_STARTER_BOOTSTRAP = true;
   const FLUSH_PROMPT_EVENT = "openwork:flushPromptDraft";
   const { showThinking } = useSessionDisplayPreferences();
   const platform = usePlatform();
@@ -2876,16 +2877,19 @@ export default function SessionView(props: SessionViewProps) {
     () => props.activeWorkspaceConfig?.blueprint?.emptyState ?? null,
   );
   const emptyStateTitle = createMemo(() => {
+    if (DISABLE_AUTOMATIC_STARTER_BOOTSTRAP) return "";
     const configured = blueprintEmptyState()?.title?.trim();
     if (configured) return configured;
     return defaultBlueprintCopyForPreset(emptyStatePreset()).title;
   });
   const emptyStateBody = createMemo(() => {
+    if (DISABLE_AUTOMATIC_STARTER_BOOTSTRAP) return "";
     const configured = blueprintEmptyState()?.body?.trim();
     if (configured) return configured;
     return defaultBlueprintCopyForPreset(emptyStatePreset()).body;
   });
   const emptyStateStarters = createMemo<ResolvedEmptyStateStarter[]>(() => {
+    if (DISABLE_AUTOMATIC_STARTER_BOOTSTRAP) return [];
     const configured = blueprintEmptyState()?.starters;
     const source =
       Array.isArray(configured)
@@ -3322,7 +3326,8 @@ export default function SessionView(props: SessionViewProps) {
                       !showStartupSkeleton() &&
                       !showSessionLoadingState() &&
                       !deferSessionRender() &&
-                      !showReactSessionSurface()
+                      !showReactSessionSurface() &&
+                      (!!emptyStateTitle() || !!emptyStateBody() || emptyStateStarters().length > 0)
                     }
                   >
                     <div class="text-center px-6 space-y-6">
