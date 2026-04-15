@@ -51,6 +51,7 @@ import { clearPerfLogs } from "./lib/perf-log";
 import { deepLinkBridgeEvent, drainPendingDeepLinks, type DeepLinkBridgeDetail } from "./lib/deep-link-bridge";
 import {
   HIDE_TITLEBAR_PREF_KEY,
+  STARTER_BOOTSTRAP_PREF_KEY,
   SUGGESTED_PLUGINS,
 } from "./constants";
 import { readDenBootstrapConfig } from "./lib/den";
@@ -281,6 +282,7 @@ export default function App() {
     createSignal<OnboardingStep>("welcome");
   const [rememberStartupChoice, setRememberStartupChoice] = createSignal(false);
   const [themeMode, setThemeMode] = createSignal<ThemeMode>(getInitialThemeMode());
+  const [starterBootstrapEnabled, setStarterBootstrapEnabled] = createSignal(true);
 
   const [engineSource, setEngineSource] = createSignal<"path" | "sidecar" | "custom">(
     isTauriRuntime() ? "sidecar" : "path"
@@ -924,6 +926,7 @@ export default function App() {
     },
     engineRuntime,
     developerMode,
+    starterBootstrapEnabled,
     pendingInitialSessionSelection,
     setPendingInitialSessionSelection,
     useMicrosandboxCreateSandbox: microsandboxCreateSandboxEnabled,
@@ -1846,6 +1849,13 @@ export default function App() {
           }
         }
 
+        const storedStarterBootstrap = window.localStorage.getItem(
+          STARTER_BOOTSTRAP_PREF_KEY,
+        );
+        if (storedStarterBootstrap === "0" || storedStarterBootstrap === "1") {
+          setStarterBootstrapEnabled(storedStarterBootstrap === "1");
+        }
+
         const storedUpdateAutoCheck = window.localStorage.getItem(
           "openwork.updateAutoCheck"
         );
@@ -2034,6 +2044,18 @@ export default function App() {
       setWindowDecorations(!hide).catch(() => {
         // ignore errors (e.g., window not ready)
       });
+    }
+  });
+
+  createEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        STARTER_BOOTSTRAP_PREF_KEY,
+        starterBootstrapEnabled() ? "1" : "0",
+      );
+    } catch {
+      // ignore
     }
   });
 
@@ -2277,6 +2299,9 @@ export default function App() {
       createSessionAndOpen,
       hideTitlebar: hideTitlebar(),
       toggleHideTitlebar: () => setHideTitlebar((v) => !v),
+      starterBootstrapEnabled: starterBootstrapEnabled(),
+      toggleStarterBootstrapEnabled: () =>
+        setStarterBootstrapEnabled((v) => !v),
       updateAutoCheck: updateAutoCheck(),
       toggleUpdateAutoCheck: () => setUpdateAutoCheck((v) => !v),
       updateAutoDownload: updateAutoDownload(),
@@ -2347,6 +2372,7 @@ export default function App() {
     selectedWorkspaceDisplay: selectedWorkspaceDisplay(),
     selectedWorkspaceRoot: workspaceStore.selectedWorkspaceRoot().trim(),
     activeWorkspaceConfig: resolvedActiveWorkspaceConfig(),
+    starterBootstrapEnabled: starterBootstrapEnabled(),
     workspaces: workspaceStore.workspaces(),
     selectedWorkspaceId: workspaceStore.selectedWorkspaceId(),
     connectingWorkspaceId: workspaceStore.connectingWorkspaceId(),
@@ -2704,7 +2730,11 @@ export default function App() {
         onPickFolder={workspaceStore.pickWorkspaceFolder}
         onImportConfig={isTauriRuntime() ? workspaceStore.importWorkspaceConfig : undefined}
         importingConfig={workspaceStore.importingWorkspaceConfig()}
-        defaultPreset={bundlesStore.createWorkspaceDefaultPreset()}
+        defaultPreset={
+          bundlesStore.createWorkspaceDefaultPreset() === "starter" && !starterBootstrapEnabled()
+            ? "minimal"
+            : bundlesStore.createWorkspaceDefaultPreset()
+        }
         onConfirmRemote={(input) => workspaceStore.createRemoteWorkspaceFlow(input)}
         onConfirmTemplate={(template, preset, folder) =>
           bundlesStore.startWorkspaceFromTeamTemplate({
