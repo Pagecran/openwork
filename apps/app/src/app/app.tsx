@@ -282,7 +282,7 @@ export default function App() {
     createSignal<OnboardingStep>("welcome");
   const [rememberStartupChoice, setRememberStartupChoice] = createSignal(false);
   const [themeMode, setThemeMode] = createSignal<ThemeMode>(getInitialThemeMode());
-  const [starterBootstrapEnabled, setStarterBootstrapEnabled] = createSignal(true);
+  const [starterBootstrapEnabled, setStarterBootstrapEnabled] = createSignal(false);
 
   const [engineSource, setEngineSource] = createSignal<"path" | "sidecar" | "custom">(
     isTauriRuntime() ? "sidecar" : "path"

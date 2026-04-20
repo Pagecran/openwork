@@ -21,7 +21,7 @@ export type UpdateStatus =
 export type PendingUpdate = { update: UpdateHandle; version: string; notes?: string } | null;
 
 export function createUpdaterState() {
-  const [updateAutoCheck, setUpdateAutoCheck] = createSignal(true);
+  const [updateAutoCheck, setUpdateAutoCheck] = createSignal(false);
   const [updateAutoDownload, setUpdateAutoDownload] = createSignal(false);
   const [updateStatus, setUpdateStatus] = createSignal<UpdateStatus>({ state: "idle", lastCheckedAt: null });
   const [pendingUpdate, setPendingUpdate] = createSignal<PendingUpdate>(null);

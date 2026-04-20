@@ -94,7 +94,7 @@ export default function CreateWorkspaceModal(props: CreateWorkspaceModalProps) {
   const platform = usePlatform();
 
   const [screen, setScreen] = createSignal<CreateWorkspaceScreen>("chooser");
-  const [preset, setPreset] = createSignal<WorkspacePreset>(props.defaultPreset ?? "starter");
+  const [preset, setPreset] = createSignal<WorkspacePreset>(props.defaultPreset ?? "minimal");
   const [selectedFolder, setSelectedFolder] = createSignal<string | null>(null);
   const [pickingFolder, setPickingFolder] = createSignal(false);
   const [showProgressDetails, setShowProgressDetails] = createSignal(false);
@@ -218,7 +218,7 @@ export default function CreateWorkspaceModal(props: CreateWorkspaceModalProps) {
   createEffect(() => {
     if (props.open) {
       const settings = readDenSettings();
-      setPreset(props.defaultPreset ?? "starter");
+      setPreset(props.defaultPreset ?? "minimal");
       setScreen("chooser");
       setCloudSettings(settings);
       setSelectedTemplateId(null);

@@ -612,7 +612,7 @@ export function createBundlesStore(options: {
     return request ? describeBundleImport(request.bundle).items : [];
   });
 
-  const createWorkspaceDefaultPreset = createMemo<WorkspacePreset>(() => createWorkspaceRequest()?.defaultPreset ?? "starter");
+  const createWorkspaceDefaultPreset = createMemo<WorkspacePreset>(() => createWorkspaceRequest()?.defaultPreset ?? "minimal");
 
   const skillDestinationWorkspaces = createMemo(() => {
     const activeId = options.workspaceStore.selectedWorkspaceId();
