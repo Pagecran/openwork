@@ -1229,14 +1229,45 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
       const existingImported = state.importedCloudProviders[cloudProviderId] ?? null;
       const localProviderId = getCloudManagedProviderId(provider);
       const apiKey = provider.apiKey?.trim() ?? "";
+      const opencodeAuth = provider.opencodeAuth?.trim() ?? "";
       const env = getCloudProviderEnv(provider.providerConfig);
-      if (!apiKey && env.length > 0) {
+      if (provider.credentialKind === "opencode_oauth" && !opencodeAuth) {
+        throw new Error(`${provider.name} does not have a stored OpenCode OAuth credential yet.`);
+      }
+      if (provider.credentialKind === "api_key" && !apiKey && env.length > 0) {
         throw new Error(`${provider.name} does not have a stored organization credential yet.`);
       }
 
       await assertCloudProviderImportSafe(provider);
 
-      if (apiKey) {
+      if (provider.credentialKind === "opencode_oauth" && opencodeAuth) {
+        let parsedAuth: unknown;
+        try {
+          parsedAuth = JSON.parse(opencodeAuth);
+        } catch {
+          throw new Error(`${provider.name} has invalid OpenCode OAuth JSON.`);
+        }
+        if (!parsedAuth || typeof parsedAuth !== "object" || Array.isArray(parsedAuth)) {
+          throw new Error(`${provider.name} OpenCode OAuth auth must be a JSON object.`);
+        }
+        const authRecord = parsedAuth as Record<string, unknown>;
+        if (authRecord.type !== "oauth") {
+          throw new Error(`${provider.name} OpenCode OAuth auth must include type "oauth".`);
+        }
+        if (typeof authRecord.access !== "string" || !authRecord.access.trim()) {
+          throw new Error(`${provider.name} OpenCode OAuth auth must include an access token.`);
+        }
+        if (typeof authRecord.refresh !== "string" || !authRecord.refresh.trim()) {
+          throw new Error(`${provider.name} OpenCode OAuth auth must include a refresh token.`);
+        }
+        if (typeof authRecord.expires !== "number" || !Number.isFinite(authRecord.expires) || authRecord.expires < 0) {
+          throw new Error(`${provider.name} OpenCode OAuth auth must include a non-negative numeric expires value.`);
+        }
+        await c.auth.set({
+          providerID: localProviderId,
+          auth: parsedAuth as Parameters<typeof c.auth.set>[0]["auth"],
+        });
+      } else if (apiKey) {
         await c.auth.set({
           providerID: localProviderId,
           auth: { type: "api", key: apiKey },
@@ -1282,6 +1313,7 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
         .filter((id) => id !== localProviderId && id !== existingImported?.providerId);
       options.setDisabledProviders(nextDisabledProviders);
       options.markOpencodeConfigReloadRequired();
+      await refreshProviders({ dispose: true }).catch(() => null);
       refreshSnapshot();
       emitChange();
       return `${t("status.connected")} ${provider.name}`;

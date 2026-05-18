@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getErrorMessage, requestJson } from "../../../../_lib/den-flow";
 
 export type DenLlmProviderSource = "models_dev" | "custom";
+export type DenLlmProviderCredentialKind = "api_key" | "opencode_oauth";
 
 export type DenLlmProviderModel = {
   id: string;
@@ -41,7 +42,10 @@ export type DenLlmProvider = {
   providerId: string;
   name: string;
   providerConfig: Record<string, unknown>;
+  credentialKind: DenLlmProviderCredentialKind;
   hasApiKey: boolean;
+  hasOpencodeAuth: boolean;
+  hasCredential: boolean;
   createdAt: string | null;
   updatedAt: string | null;
   canManage: boolean;
@@ -175,6 +179,7 @@ function asLlmProvider(value: unknown): DenLlmProvider | null {
   const providerId = asString(value.providerId);
   const name = asString(value.name);
   const source = value.source === "models_dev" || value.source === "custom" ? value.source : null;
+  const credentialKind = value.credentialKind === "opencode_oauth" ? "opencode_oauth" : "api_key";
   if (!id || !organizationId || !createdByOrgMembershipId || !providerId || !name || !source) {
     return null;
   }
@@ -187,7 +192,10 @@ function asLlmProvider(value: unknown): DenLlmProvider | null {
     providerId,
     name,
     providerConfig: asJsonRecord(value.providerConfig),
+    credentialKind,
     hasApiKey: value.hasApiKey === true,
+    hasOpencodeAuth: value.hasOpencodeAuth === true,
+    hasCredential: value.hasCredential === true || value.hasApiKey === true || value.hasOpencodeAuth === true,
     createdAt: asIsoString(value.createdAt),
     updatedAt: asIsoString(value.updatedAt),
     canManage: value.canManage === true,
