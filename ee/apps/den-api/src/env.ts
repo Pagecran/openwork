@@ -33,8 +33,12 @@ const EnvSchema = z.object({
   PORT: z.string().optional(),
   CORS_ORIGINS: z.string().optional(),
   WORKER_PROXY_PORT: z.string().optional(),
-  PROVISIONER_MODE: z.enum(["stub", "render", "daytona"]).optional(),
+  PROVISIONER_MODE: z.enum(["stub", "render", "daytona", "static"]).optional(),
   WORKER_URL_TEMPLATE: z.string().optional(),
+  STATIC_WORKER_URLS: z.string().optional(),
+  STATIC_WORKER_HEALTH_PATH: z.string().optional(),
+  STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS: z.string().optional(),
+  STATIC_WORKER_HEALTHCHECK_INTERVAL_MS: z.string().optional(),
   WORKER_ACTIVITY_BASE_URL: z.string().optional(),
   OPENWORK_DAYTONA_ENV_PATH: z.string().optional(),
   RENDER_API_BASE: z.string().optional(),
@@ -209,6 +213,12 @@ export const env = {
   corsOrigins,
   provisionerMode: parsed.PROVISIONER_MODE ?? "daytona",
   workerUrlTemplate: parsed.WORKER_URL_TEMPLATE,
+  staticWorkers: {
+    urls: splitCsv(parsed.STATIC_WORKER_URLS).map((url) => url.replace(/\/+$/, "")),
+    healthPath: optionalString(parsed.STATIC_WORKER_HEALTH_PATH) ?? "/health",
+    healthcheckTimeoutMs: Number(parsed.STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS ?? "10000"),
+    healthcheckIntervalMs: Number(parsed.STATIC_WORKER_HEALTHCHECK_INTERVAL_MS ?? "1000"),
+  },
   workerActivityBaseUrl:
     optionalString(parsed.WORKER_ACTIVITY_BASE_URL) ??
     parsed.BETTER_AUTH_URL.trim().replace(/\/+$/, ""),

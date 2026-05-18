@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto"
-import { and, asc, desc, eq, isNull } from "@openwork-ee/den-db/drizzle"
+import { and, asc, desc, eq, inArray, isNull } from "@openwork-ee/den-db/drizzle"
 import {
   AuditEventTable,
   AuthUserTable,
@@ -303,6 +303,24 @@ export async function getLatestWorkerInstance(workerId: WorkerId) {
   return rows[0] ?? null
 }
 
+async function getUnavailableStaticWorkerUrls() {
+  if (env.provisionerMode !== "static") {
+    return []
+  }
+
+  const rows = await db
+    .select({ url: WorkerInstanceTable.url })
+    .from(WorkerInstanceTable)
+    .where(
+      and(
+        eq(WorkerInstanceTable.provider, "static"),
+        inArray(WorkerInstanceTable.status, ["provisioning", "healthy"]),
+      ),
+    )
+
+  return rows.map((row) => normalizeUrl(row.url)).filter(Boolean)
+}
+
 export function toInstanceResponse(instance: WorkerInstanceRow | null) {
   if (!instance) {
     return null
@@ -352,6 +370,7 @@ export async function continueCloudProvisioning(input: {
       hostToken: input.hostToken,
       clientToken: input.clientToken,
       activityToken: input.activityToken,
+      unavailableStaticWorkerUrls: await getUnavailableStaticWorkerUrls(),
     })
 
     await db

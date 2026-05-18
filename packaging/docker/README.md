@@ -62,8 +62,42 @@ Optional env vars (via `.env` or `export`):
 - `DEN_MCP_RESOURCE_URL` — API-facing MCP resource URL (defaults to `http://localhost:<DEN_API_PORT>/mcp`)
 - `DEN_BETTER_AUTH_TRUSTED_ORIGINS` — trusted origins for Better Auth (defaults to `DEN_CORS_ORIGINS`)
 - `DEN_CORS_ORIGINS` — trusted origins for Express CORS (defaults include hostname, localhost, `127.0.0.1`, `0.0.0.0`, and detected LAN IPv4)
-- `DEN_PROVISIONER_MODE` — `stub` or `render` (defaults to `stub`)
+- `DEN_PROVISIONER_MODE` — `stub`, `static`, `render`, or `daytona` (defaults to `stub`)
 - `DEN_WORKER_URL_TEMPLATE` — stub worker URL template with `{workerId}` placeholder
+- `DEN_STATIC_WORKER_URLS` — comma-separated LAN/local OpenWork worker URLs used when `DEN_PROVISIONER_MODE=static`; each URL is assigned to at most one active static worker instance
+- `DEN_STATIC_WORKER_HEALTH_PATH` — health path checked for static workers (defaults to `/health`)
+- `DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS` — static worker health timeout (defaults to `10000`)
+
+### On-prem/static worker mode
+
+Use static mode when Den is self-hosted on a LAN and workers are already running on local infrastructure. Den does not launch those workers; it assigns one configured URL that is not already used by an active static `worker_instance` to each cloud/shared worker request, checks the worker health endpoint, records a `worker_instance`, and marks the worker `healthy` only when the endpoint responds successfully.
+
+Run Den against a real LAN worker:
+
+```bash
+export DEN_PROVISIONER_MODE=static
+export DEN_STATIC_WORKER_URLS=http://192.168.1.50:8787
+./packaging/docker/den-dev-up.sh
+```
+
+If you need a compose-only smoke test before wiring a real OpenWork runtime, start the bundled health-only worker simulation:
+
+```bash
+export DEN_PROVISIONER_MODE=static
+export DEN_STATIC_WORKER_URLS=http://static-worker-smoke:8787
+docker compose --profile static-worker-smoke -p openwork-den-static \
+  -f packaging/docker/docker-compose.den-dev.yml up --build
+```
+
+Validate the sample endpoint from the host:
+
+```bash
+curl http://127.0.0.1:${DEN_STATIC_WORKER_SMOKE_PORT:-8787}/health
+```
+
+Then create a cloud/shared worker in the Den web UI. With a reachable static worker URL, the worker should move from `provisioning` to `healthy` and show a `static` instance. If `DEN_STATIC_WORKER_URLS` is empty or the health check fails, Den marks the worker `failed` and logs a clear provisioning error instead of leaving it stuck on `Starting`.
+
+The `static-worker-smoke` service is intentionally only a health-check simulation for provisioning validation; it is not a production OpenWork runtime and will not satisfy workspace/session APIs.
 
 ### Faster inner-loop alternative
 

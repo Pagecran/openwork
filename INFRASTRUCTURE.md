@@ -79,6 +79,7 @@ But what you can do is:
 ### OpenWork Cloud Control Plane
 
 * Hosted deployment of OpenWork server capabilities for worker provisioning and remote connect.
+* Self-hosted Den deployments may use `PROVISIONER_MODE=static` with `STATIC_WORKER_URLS` to attach cloud/shared worker records to pre-running LAN/on-prem OpenWork worker runtimes; Den validates `/health` before marking those workers healthy.
 * Must preserve the same user-level contract as self-hosted paths:
   - launch worker
   - get connect credentials (URL + token)

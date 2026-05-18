@@ -1,0 +1,32 @@
+scope: repo
+name: openwork
+purpose: >
+  Repository navigation index. Points to current-state
+  product specs, process docs, and module entrypoints.
+
+code_roots: []
+
+links: []
+
+entrypoints: []
+sources_of_truth:
+  - path: AGENTS.md
+    summary: "Repository guidance and operational policies for OpenWork agents."
+  - path: INFRASTRUCTURE.md
+    summary: "Infrastructure principles, including Den static/on-prem worker provisioning semantics."
+  - path: package.json
+    summary: "Workspace scripts and package-manager configuration."
+commands:
+  test: "pnpm --filter @openwork-ee/den-api exec bun test test/provisioner-static.test.ts"
+  build: "pnpm --filter @openwork-ee/den-api build && pnpm --filter @openwork-ee/den-db build"
+  lint: "echo 'No global lint command defined'"
+
+modules:
+  - path: apps
+    summary: "OpenWork app, desktop, server, and orchestrator packages."
+  - path: ee
+    summary: "Enterprise Den API, web, shared packages, and Den database schema."
+  - path: packaging
+    summary: "Docker and packaging surfaces for self-hosted OpenWork and Den stacks."
+  - path: scripts
+    summary: "Development and release automation scripts."
