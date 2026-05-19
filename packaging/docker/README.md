@@ -1,5 +1,7 @@
 # OpenWork Host (Docker)
 
+For an operator-focused LAN/on-prem Den deployment guide, see [`ONPREM_DEN_STATIC_RUNBOOK.md`](./ONPREM_DEN_STATIC_RUNBOOK.md). It covers Den `PROVISIONER_MODE=static`, real OpenWork worker containers, multiple worker URLs, validation, restart/stop, and troubleshooting.
+
 ## Den local stack (Docker)
 
 One command for the Den control plane, local MySQL, and the cloud web app.
@@ -71,6 +73,8 @@ Optional env vars (via `.env` or `export`):
 ### On-prem/static worker mode
 
 Use static mode when Den is self-hosted on a LAN and workers are already running on local infrastructure. Den does not launch those workers; it assigns one configured URL that is not already used by an active static `worker_instance` to each cloud/shared worker request, checks the worker health endpoint, records a `worker_instance`, and marks the worker `healthy` only when the endpoint responds successfully.
+
+The real worker container path is the production container in this directory (`Dockerfile` + `docker-compose.yml`). It defaults to `openwork-orchestrator@0.13.8`, matching `apps/orchestrator/package.json`; override `OPENWORK_ORCHESTRATOR_VERSION` during `docker compose up --build` only when intentionally pinning another released worker version.
 
 Run Den against a real LAN worker:
 
@@ -178,7 +182,7 @@ Useful overrides:
 
 ## Production container
 
-This is a minimal packaging template to run the OpenWork Host contract in a single container.
+This is a minimal packaging template to run the OpenWork Host contract in a single container. In Den static deployments, each instance of this container is a real worker URL for `DEN_STATIC_WORKER_URLS`.
 
 It runs:
 
@@ -197,6 +201,36 @@ Then open:
 
 - `http://127.0.0.1:8787/ui`
 
+For LAN use, set a stable host port and connect host before launch:
+
+```bash
+OPENWORK_HOST_PORT=8787 \
+OPENWORK_CONNECT_HOST=192.168.1.50 \
+OPENWORK_WORKSPACE_DIR=./workspace-worker-1 \
+OPENWORK_DATA_DIR_HOST=./data-worker-1 \
+OPENWORK_TOKEN=replace-with-client-token \
+OPENWORK_HOST_TOKEN=replace-with-host-token \
+docker compose -p openwork-worker-1 up --build -d
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:OPENWORK_HOST_PORT = "8787"
+$env:OPENWORK_CONNECT_HOST = "192.168.1.50"
+$env:OPENWORK_WORKSPACE_DIR = "./workspace-worker-1"
+$env:OPENWORK_DATA_DIR_HOST = "./data-worker-1"
+$env:OPENWORK_TOKEN = "replace-with-client-token"
+$env:OPENWORK_HOST_TOKEN = "replace-with-host-token"
+docker compose -p openwork-worker-1 up --build -d
+```
+
+Validate the worker before adding it to Den:
+
+```bash
+curl http://192.168.1.50:8787/health
+```
+
 ### Config
 
 Recommended env vars:
@@ -206,6 +240,11 @@ Recommended env vars:
 
 Optional:
 
+- `OPENWORK_ORCHESTRATOR_VERSION=0.13.8` (build arg; override only for a deliberate pinned release)
+- `OPENWORK_HOST_PORT=8787` (host port mapped to container port 8787)
+- `OPENWORK_CONNECT_HOST=<LAN IP or DNS name>` (host embedded in pairing/connect output)
+- `OPENWORK_WORKSPACE_DIR=./workspace-worker-1` (host workspace mount)
+- `OPENWORK_DATA_DIR_HOST=./data-worker-1` (host data mount)
 - `OPENWORK_APPROVAL_MODE=auto|manual`
 - `OPENWORK_APPROVAL_TIMEOUT_MS=30000`
 

@@ -1,0 +1,44 @@
+scope: module
+parent: ../codemap.yml
+name: packaging/docker
+purpose: "Docker packaging and Compose runbooks for OpenWork host workers and Den local/static deployments."
+
+entrypoints:
+  - path: den-dev-up.sh
+    description: "Convenience launcher for the Dockerized Den local stack."
+  - path: docker-compose.yml
+    description: "Production OpenWork Host worker Compose template used by Den static LAN deployments."
+  - path: docker-compose.den-dev.yml
+    description: "Dockerized Den control plane/web/MySQL stack with optional static-worker-smoke profile."
+  - path: docker-compose.dev.yml
+    description: "Development Compose stack for local OpenWork services."
+  - path: docker-compose.web-local.yml
+    description: "Compose stack used by hybrid local Den web/API development."
+
+wiring:
+  - path: Dockerfile
+    description: "Builds the OpenWork Host worker container from the published openwork-orchestrator package."
+  - path: Dockerfile.den
+    description: "Builds the Den API/control plane container."
+  - path: Dockerfile.den-web
+    description: "Builds the Den web container."
+  - path: Dockerfile.den-worker-proxy
+    description: "Builds the Den worker proxy container."
+  - path: Dockerfile.microsandbox
+    description: "Builds the pre-baked micro-sandbox OpenWork image."
+
+sources_of_truth:
+  - path: README.md
+    summary: "Docker packaging overview and local Den/OpenWork Host instructions."
+  - path: ONPREM_DEN_STATIC_RUNBOOK.md
+    summary: "Operator runbook for LAN/on-prem Den static deployments with real OpenWork worker containers."
+
+internals:
+  - path: microsandbox-entrypoint.sh
+    description: "Entrypoint script for the micro-sandbox image."
+invariants:
+  - "The production worker Dockerfile should default to the current apps/orchestrator package version unless intentionally pinned and documented."
+  - "static-worker-smoke is a health-only simulation and must not be documented as a production worker runtime."
+commands:
+  validate_worker_compose: "cd packaging/docker && docker compose -p openwork-worker-1 config"
+  validate_den_static_compose: "DEN_PROVISIONER_MODE=static DEN_STATIC_WORKER_URLS=http://192.168.1.50:8787 docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml config"

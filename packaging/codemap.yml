@@ -1,0 +1,19 @@
+scope: module
+parent: ../codemap.yml
+name: packaging
+purpose: "Packaging surfaces for Docker and platform-specific distribution."
+
+modules:
+  - path: aur
+    summary: "Arch/AUR packaging assets."
+  - path: docker
+    summary: "Dockerfiles, Compose stacks, and operator docs for OpenWork and Den."
+
+entrypoints: []
+wiring: []
+sources_of_truth: []
+internals: []
+invariants:
+  - "Packaging examples must avoid committed secrets and use environment variables for deployment-specific credentials."
+commands:
+  validate_docker: "docker compose -p openwork-worker-1 -f packaging/docker/docker-compose.yml config"

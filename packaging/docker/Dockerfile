@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim
 
-ARG OPENWORK_ORCHESTRATOR_VERSION=0.11.22
+ARG OPENWORK_ORCHESTRATOR_VERSION=0.13.8
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -34,15 +34,7 @@ VOLUME ["/workspace", "/data"]
 # - OpenWork server proxies OpenCode via localhost
 # - OpenCode Router disabled by default
 CMD [
-  "openwork",
-  "serve",
-  "--workspace", "/workspace",
-  "--remote-access",
-  "--openwork-port", "8787",
-  "--opencode-host", "127.0.0.1",
-  "--opencode-port", "4096",
-  "--connect-host", "127.0.0.1",
-  "--cors", "*",
-  "--approval", "manual",
-  "--no-opencode-router"
+  "sh",
+  "-lc",
+  "openwork serve --workspace /workspace --remote-access --openwork-port ${OPENWORK_PORT:-8787} --opencode-host 127.0.0.1 --opencode-port 4096 --connect-host ${OPENWORK_CONNECT_HOST:-127.0.0.1} --cors ${OPENWORK_CORS_ORIGINS:-'*'} --approval ${OPENWORK_APPROVAL_MODE:-manual} --no-opencode-router"
 ]

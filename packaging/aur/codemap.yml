@@ -1,0 +1,20 @@
+scope: module
+parent: ../codemap.yml
+name: packaging/aur
+purpose: "Arch/AUR packaging metadata for OpenWork."
+
+entrypoints:
+  - path: PKGBUILD
+    description: "AUR build recipe."
+
+wiring: []
+sources_of_truth:
+  - path: .SRCINFO
+    summary: "Generated AUR package metadata checked in for package publication."
+  - path: README.md
+    summary: "AUR packaging notes."
+internals: []
+invariants:
+  - "AUR metadata must stay aligned with the PKGBUILD recipe when package versions or release assets change."
+commands:
+  validate: "echo 'No automated AUR packaging validation command defined'"
