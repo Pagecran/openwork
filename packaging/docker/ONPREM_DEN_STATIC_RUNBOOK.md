@@ -134,7 +134,70 @@ curl http://127.0.0.1:3005/api/den/health
 
 `DEN_STATIC_WORKER_URLS` is comma-separated. Den trims trailing slashes, probes each URL's configured health path, and assigns one not-already-active static URL per worker request.
 
-## 4. Validate Den UI behavior and add a shared workspace
+## 4. Configure Microsoft Entra ID SSO for on-prem Den
+
+Email/password sign-in stays enabled for break-glass administrator access. Microsoft Entra ID SSO is enabled only when all provider variables below are present.
+
+### Entra app registration
+
+1. In Microsoft Entra admin center, create or open an App registration for Den.
+2. Add a Web redirect URI using the Den browser-facing auth origin and Better Auth callback path:
+   - `http://den.company.local/api/auth/callback/microsoft`
+   - For this Compose runbook's local defaults, use `http://localhost:3005/api/auth/callback/microsoft`.
+3. Create a client secret and keep it outside source control.
+4. Configure ID token optional claims so Den receives `email` where available and `groups` for group object IDs. Den only reads the token `groups` claim; Microsoft Graph overage lookup is intentionally out of scope.
+5. Record the fixed tenant ID. Do not use `common` for on-prem Den SSO.
+
+### Den environment variables
+
+Set these before starting Den:
+
+```bash
+export DEN_BETTER_AUTH_URL=http://den.company.local
+export DEN_ENTRA_TENANT_ID=00000000-0000-0000-0000-000000000000
+export DEN_ENTRA_CLIENT_ID=11111111-1111-1111-1111-111111111111
+export DEN_ENTRA_CLIENT_SECRET=replace-with-client-secret
+```
+
+Optional organization auto-join maps all Microsoft SSO sign-ins into one Den organization. Prefer the canonical organization ID; `DEN_ENTRA_AUTO_JOIN_ORG_SLUG` is available only as an operator convenience and must resolve to exactly one org.
+
+```bash
+export DEN_ENTRA_AUTO_JOIN_ENABLED=true
+export DEN_ENTRA_AUTO_JOIN_ORG_ID=organization_replace_me
+# Optional, only if no org ID is set and the slug is unambiguous:
+# export DEN_ENTRA_AUTO_JOIN_ORG_SLUG=platform-team
+```
+
+Optional Entra group-to-role mapping uses comma-separated Entra group object IDs from the token `groups` claim:
+
+```bash
+export DEN_ENTRA_ADMIN_GROUP_IDS=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+export DEN_ENTRA_MEMBER_GROUP_IDS=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb,cccccccc-cccc-cccc-cccc-cccccccccccc
+```
+
+Role behavior:
+
+- Default SSO auto-join role is `member` when no group mapping matches.
+- If both admin and member groups match, `admin` wins.
+- SSO never assigns `owner`; existing owner memberships are preserved.
+- If Entra omits `email`, Den falls back to `preferred_username`/UPN where Better Auth's Microsoft provider profile mapping allows it.
+
+### Validate SSO
+
+1. Restart Den after setting the environment variables.
+2. Confirm the Microsoft sign-in option appears on the auth screen.
+3. Sign in with a tenant user and verify the callback URL is accepted by Entra.
+4. Confirm the user is a member of the configured Den organization with the expected `admin` or `member` role.
+5. Confirm an existing admin can still sign in with email/password.
+
+Troubleshooting:
+
+- Missing Microsoft sign-in option: confirm `DEN_ENTRA_TENANT_ID`, `DEN_ENTRA_CLIENT_ID`, and `DEN_ENTRA_CLIENT_SECRET` are all set and that tenant ID is not `common`.
+- Entra callback error: confirm the redirect URI exactly matches `http://den.company.local/api/auth/callback/microsoft` for the configured Den auth origin.
+- User joined as `member`: confirm Entra emitted a `groups` claim and the configured group object ID matches `DEN_ENTRA_ADMIN_GROUP_IDS`.
+- User not auto-joined: confirm `DEN_ENTRA_AUTO_JOIN_ENABLED=true` and `DEN_ENTRA_AUTO_JOIN_ORG_ID` points to an existing Den organization.
+
+## 5. Validate Den UI behavior and add a shared workspace
 
 1. Open `http://<den-host>:3005`.
 2. Sign in or use the local demo org if seeded.
@@ -149,7 +212,7 @@ curl http://127.0.0.1:3005/api/den/health
 
 If the UI exposes `Add worker` -> `Connect remote`, use the URL + token from the healthy OpenWork worker. The base user contract remains URL + token; billing gates are not required for base on-prem static worker attachment.
 
-## 5. Smoke simulation only
+## 6. Smoke simulation only
 
 Use this only to validate Den static provisioning without a real OpenWork runtime:
 
@@ -175,7 +238,7 @@ curl http://127.0.0.1:8787/health
 
 Do not use `static-worker-smoke` for production or workspace/session validation.
 
-## 6. Compose validation before launch
+## 7. Compose validation before launch
 
 PowerShell:
 
@@ -206,7 +269,7 @@ docker compose -p openwork-worker-1 config
 
 In rendered output, confirm Den has `PROVISIONER_MODE: static` and `STATIC_WORKER_URLS` set to the real LAN worker URLs, and the worker build arg is the expected orchestrator version.
 
-## 7. Restart, stop, and logs
+## 8. Restart, stop, and logs
 
 Restart Den:
 
@@ -241,7 +304,7 @@ Reset Den dev database volumes only when intentional:
 docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml down -v
 ```
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 - Worker remains `Starting`: from the Den host, run `curl http://<worker-host>:8787/health`. Fix routing, firewall, or the worker container before retrying.
 - Worker becomes `failed`: inspect Den logs with `docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml logs den` and confirm `DEN_STATIC_WORKER_URLS` is non-empty and points to real workers.

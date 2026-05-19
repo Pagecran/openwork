@@ -1,6 +1,7 @@
-import { and, asc, eq, inArray } from "@openwork-ee/den-db/drizzle"
+import { and, asc, desc, eq, inArray } from "@openwork-ee/den-db/drizzle"
 import {
   AuthSessionTable,
+  AuthAccountTable,
   AuthUserTable,
   InvitationTable,
   MemberTable,
@@ -12,6 +13,8 @@ import {
 import { normalizeDesktopAppRestrictions, type DesktopAppRestrictions } from "@openwork/types/den/desktop-app-restrictions"
 import { createDenTypeId, normalizeDenTypeId } from "@openwork-ee/utils/typeid"
 import { db } from "./db.js"
+import { env } from "./env.js"
+import { ensureEntraSsoMembership } from "./entra-sso.js"
 import { DEFAULT_ORGANIZATION_LIMITS, normalizeOrganizationMetadata, serializeOrganizationMetadata } from "./organization-limits.js"
 import { denDefaultDynamicOrganizationRoles, denOrganizationStaticRoles } from "./organization-access.js"
 
@@ -379,6 +382,99 @@ async function insertMemberIfMissing(input: {
   }
 
   return created[0]
+}
+
+async function resolveEntraAutoJoinOrganizationId(input: {
+  organizationId?: string
+  organizationSlug?: string
+}): Promise<OrgId | null> {
+  if (input.organizationId) {
+    try {
+      const organizationId = normalizeDenTypeId("organization", input.organizationId)
+      const rows = await db
+        .select({ id: OrganizationTable.id })
+        .from(OrganizationTable)
+        .where(eq(OrganizationTable.id, organizationId))
+        .limit(1)
+
+      return rows[0]?.id ?? null
+    } catch {
+      return null
+    }
+  }
+
+  const slug = input.organizationSlug?.trim()
+  if (!slug) {
+    return null
+  }
+
+  const rows = await db
+    .select({ id: OrganizationTable.id })
+    .from(OrganizationTable)
+    .where(eq(OrganizationTable.slug, slug))
+    .limit(2)
+
+  return rows.length === 1 ? rows[0].id : null
+}
+
+async function latestMicrosoftIdTokenForUser(userId: UserId) {
+  const rows = await db
+    .select({ idToken: AuthAccountTable.idToken })
+    .from(AuthAccountTable)
+    .where(and(eq(AuthAccountTable.userId, userId), eq(AuthAccountTable.providerId, "microsoft")))
+    .orderBy(desc(AuthAccountTable.updatedAt))
+    .limit(1)
+
+  return rows[0]?.idToken ?? null
+}
+
+export async function ensureEntraSsoMembershipForAccount(input: {
+  userId: UserId
+  providerId?: string | null
+  idToken?: string | null
+}) {
+  const idToken = input.idToken ?? await latestMicrosoftIdTokenForUser(input.userId)
+  return ensureEntraSsoMembership({
+    userId: input.userId,
+    providerId: input.providerId,
+    idToken,
+    config: env.entra,
+    deps: {
+      resolveOrganizationId: async (selector) => resolveEntraAutoJoinOrganizationId(selector) as Promise<string | null>,
+      getExistingMember: async ({ organizationId, userId }) => {
+        const existing = await db
+          .select()
+          .from(MemberTable)
+          .where(and(eq(MemberTable.organizationId, organizationId as OrgId), eq(MemberTable.userId, userId as UserId)))
+          .limit(1)
+
+        return existing[0] ?? null
+      },
+      createMember: async ({ organizationId, userId, role }) => insertMemberIfMissing({
+        organizationId: organizationId as OrgId,
+        userId: userId as UserId,
+        role,
+      }),
+      updateMemberRole: async ({ memberId, role }) => {
+        await db
+          .update(MemberTable)
+          .set({ role })
+          .where(eq(MemberTable.id, memberId as MemberId))
+
+        const updatedRows = await db
+          .select()
+          .from(MemberTable)
+          .where(eq(MemberTable.id, memberId as MemberId))
+          .limit(1)
+        if (!updatedRows[0]) {
+          throw new Error("failed_to_update_member")
+        }
+        return updatedRows[0]
+      },
+      ensureDefaultRoles: async (organizationId) => ensureDefaultDynamicRoles(organizationId as OrgId),
+      isOwnerRole: roleIncludesOwner,
+    },
+  })
 }
 
 async function acceptInvitation(invitation: InvitationRow, userId: UserId) {

@@ -1,4 +1,5 @@
 import { DEN_WORKER_POLL_INTERVAL_MS } from "./CONSTS.js"
+import { parseEntraSsoEnv } from "./entra-sso.js"
 import { z } from "zod"
 
 const EnvSchema = z.object({
@@ -21,6 +22,14 @@ const EnvSchema = z.object({
   GITHUB_CONNECTOR_APP_WEBHOOK_SECRET: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  DEN_ENTRA_TENANT_ID: z.string().optional(),
+  DEN_ENTRA_CLIENT_ID: z.string().optional(),
+  DEN_ENTRA_CLIENT_SECRET: z.string().optional(),
+  DEN_ENTRA_AUTO_JOIN_ENABLED: z.string().optional(),
+  DEN_ENTRA_AUTO_JOIN_ORG_ID: z.string().optional(),
+  DEN_ENTRA_AUTO_JOIN_ORG_SLUG: z.string().optional(),
+  DEN_ENTRA_ADMIN_GROUP_IDS: z.string().optional(),
+  DEN_ENTRA_MEMBER_GROUP_IDS: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   SMTP_HOST: z.string().optional(),
@@ -117,6 +126,37 @@ const EnvSchema = z.object({
       }
     }
   }
+
+  const hasAnyEntraProviderValue = Boolean(value.DEN_ENTRA_TENANT_ID || value.DEN_ENTRA_CLIENT_ID || value.DEN_ENTRA_CLIENT_SECRET)
+  if (hasAnyEntraProviderValue) {
+    for (const key of ["DEN_ENTRA_TENANT_ID", "DEN_ENTRA_CLIENT_ID", "DEN_ENTRA_CLIENT_SECRET"] as const) {
+      if (!value[key]?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${key} is required when configuring Microsoft Entra SSO`,
+          path: [key],
+        })
+      }
+    }
+
+    if (value.DEN_ENTRA_TENANT_ID?.trim().toLowerCase() === "common") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "DEN_ENTRA_TENANT_ID must be a fixed tenant ID for on-prem Entra SSO",
+        path: ["DEN_ENTRA_TENANT_ID"],
+      })
+    }
+  }
+
+  if ((value.DEN_ENTRA_AUTO_JOIN_ENABLED ?? "false").toLowerCase() === "true"
+    && !value.DEN_ENTRA_AUTO_JOIN_ORG_ID?.trim()
+    && !value.DEN_ENTRA_AUTO_JOIN_ORG_SLUG?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "DEN_ENTRA_AUTO_JOIN_ORG_ID or DEN_ENTRA_AUTO_JOIN_ORG_SLUG is required when DEN_ENTRA_AUTO_JOIN_ENABLED=true",
+      path: ["DEN_ENTRA_AUTO_JOIN_ORG_ID"],
+    })
+  }
 })
 
 const parsed = EnvSchema.parse(process.env)
@@ -192,6 +232,7 @@ export const env = {
     clientId: optionalString(parsed.GOOGLE_CLIENT_ID),
     clientSecret: optionalString(parsed.GOOGLE_CLIENT_SECRET),
   },
+  entra: parseEntraSsoEnv(parsed),
   email: {
     from: optionalString(parsed.EMAIL_FROM),
   },
