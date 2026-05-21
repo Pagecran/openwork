@@ -168,23 +168,24 @@ export function registerOrgInvitationRoutes<T extends { Variables: OrgRouteVaria
       })
     } catch (error) {
       if (error instanceof DenEmailSendError) {
+        const sendError = error as DenEmailSendError
         // The invitation row is already persisted (step above). Log at error
         // level so operators can grep, and return a 502 so the caller can
         // render a real failure instead of a silent success. The invitation
         // id is included so the UI can correlate and offer a direct retry.
         console.error(
-          `[auth][invite_email_failed] organization=${payload.organization.id} invitation=${invitationId} email=${email} reason=${error.reason}${error.detail ? ` detail=${error.detail}` : ""}`,
+          `[auth][invite_email_failed] organization=${payload.organization.id} invitation=${invitationId} email=${email} reason=${sendError.reason}${sendError.detail ? ` detail=${sendError.detail}` : ""}`,
         )
 
         return c.json({
           error: "invitation_email_failed" as const,
-          reason: error.reason,
+          reason: sendError.reason,
           message:
-            error.reason === "email_not_configured"
+            sendError.reason === "email_not_configured"
               ? "The invitation email provider is not configured on this deployment."
-              : error.reason === "resend_network"
+              : sendError.reason === "resend_network"
                 ? "Could not reach the invitation email provider. The invitation is saved; retry to send again."
-                : `The invitation email provider rejected the send${error.detail ? `: ${error.detail}` : "."}`,
+                : `The invitation email provider rejected the send${sendError.detail ? `: ${sendError.detail}` : "."}`,
           invitationId,
         }, 502)
       }
