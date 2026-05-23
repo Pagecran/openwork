@@ -275,6 +275,15 @@ function releaseStaticWorkerUrl(workerId: string, url: string) {
   }
 }
 
+export function releaseStaticWorkerReservation(input: {
+  workerId: WorkerId
+  instanceUrl: string | null
+}) {
+  if (input.instanceUrl) {
+    releaseStaticWorkerUrl(input.workerId, safeNormalizeWorkerUrl(input.instanceUrl))
+  }
+}
+
 export async function provisionStaticWorker(
   input: ProvisionInput,
   config: StaticWorkerConfig = env.staticWorkers,
@@ -526,9 +535,7 @@ export async function deprovisionWorker(input: {
   instanceUrl: string | null
 }) {
   if (env.provisionerMode === "static") {
-    if (input.instanceUrl) {
-      releaseStaticWorkerUrl(input.workerId, safeNormalizeWorkerUrl(input.instanceUrl))
-    }
+    releaseStaticWorkerReservation(input)
     return
   }
 

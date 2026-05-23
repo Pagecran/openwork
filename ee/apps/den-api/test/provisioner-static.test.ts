@@ -628,8 +628,8 @@ test("static provisioner in-process reservations prevent concurrent duplicate as
 
   const fulfilled = results.find((result): result is PromiseFulfilledResult<ProvisionedInstance> => result.status === "fulfilled")
   expect(fulfilled?.value.url).toBe(staticWorkerUrl)
-  await provisionerModule.deprovisionWorker({ workerId: "worker_static_concurrent_a_123", instanceUrl: staticWorkerUrl })
-  await provisionerModule.deprovisionWorker({ workerId: "worker_static_concurrent_b_123", instanceUrl: staticWorkerUrl })
+  provisionerModule.releaseStaticWorkerReservation({ workerId: "worker_static_concurrent_a_123", instanceUrl: staticWorkerUrl })
+  provisionerModule.releaseStaticWorkerReservation({ workerId: "worker_static_concurrent_b_123", instanceUrl: staticWorkerUrl })
 })
 
 test("static provisioner releases failed health reservations for reuse", async () => {
