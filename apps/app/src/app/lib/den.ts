@@ -120,6 +120,7 @@ export type DenOrgLlmProviderModel = {
 export type DenOrgLlmProvider = {
   id: string;
   source: "models_dev" | "custom" | "openwork";
+  credentialKind: "api_key" | "opencode_oauth";
   providerId: string;
   name: string;
   providerConfig: Record<string, unknown>;
@@ -922,6 +923,7 @@ function parseDenOrgLlmProvider(value: unknown): DenOrgLlmProvider | null {
   return {
     id: value.id,
     source: value.source,
+    credentialKind: value.credentialKind === "opencode_oauth" ? "opencode_oauth" : "api_key",
     providerId: value.providerId,
     name: value.name,
     providerConfig: isRecord(value.providerConfig) ? value.providerConfig : {},
