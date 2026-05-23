@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "@openwork-ee/den-db/drizzle"
+import { and, asc, desc, eq, inArray, isNull } from "@openwork-ee/den-db/drizzle"
 import {
   AuthSessionTable,
   AuthAccountTable,
@@ -282,7 +282,7 @@ async function listMembershipRows(userId: UserId) {
   return db
     .select()
     .from(MemberTable)
-    .where(eq(MemberTable.userId, userId))
+    .where(and(eq(MemberTable.userId, userId), isNull(MemberTable.removedAt)))
     .orderBy(asc(MemberTable.createdAt))
 }
 
@@ -445,7 +445,7 @@ export async function ensureEntraSsoMembershipForAccount(input: {
         const existing = await db
           .select()
           .from(MemberTable)
-          .where(and(eq(MemberTable.organizationId, organizationId as OrgId), eq(MemberTable.userId, userId as UserId)))
+          .where(and(eq(MemberTable.organizationId, organizationId as OrgId), eq(MemberTable.userId, userId as UserId), isNull(MemberTable.removedAt)))
           .limit(1)
 
         return existing[0] ?? null
@@ -799,7 +799,7 @@ export async function listUserOrgs(userId: UserId) {
     })
     .from(MemberTable)
     .innerJoin(OrganizationTable, eq(MemberTable.organizationId, OrganizationTable.id))
-    .where(eq(MemberTable.userId, userId))
+    .where(and(eq(MemberTable.userId, userId), isNull(MemberTable.removedAt)))
     .orderBy(asc(MemberTable.createdAt))
 
   return memberships.map((row) => ({
@@ -868,7 +868,7 @@ export async function getOrganizationContextForUser(input: {
   const currentMemberRows = await db
     .select()
     .from(MemberTable)
-    .where(and(eq(MemberTable.organizationId, organization.id), eq(MemberTable.userId, input.userId)))
+    .where(and(eq(MemberTable.organizationId, organization.id), eq(MemberTable.userId, input.userId), isNull(MemberTable.removedAt)))
     .limit(1)
 
   const currentMember = currentMemberRows[0]
@@ -932,13 +932,14 @@ export async function getOrganizationContextForUser(input: {
     },
     currentMember: {
       id: currentMember.id,
-      userId: currentMember.userId,
+      userId: input.userId,
       role: currentMember.role,
       createdAt: currentMember.createdAt,
       isOwner: roleIncludesOwner(currentMember.role),
     },
     members: members.map((member) => ({
       ...member,
+      userId: member.user.id,
       isOwner: roleIncludesOwner(member.role),
     })),
     invitations,
