@@ -78,8 +78,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/ui
       '@paper-design/shaders-react':
-        specifier: 0.0.72
-        version: 0.0.72(@types/react@19.2.14)(react@19.2.4)
+        specifier: 0.0.76
+        version: 0.0.76(@types/react@19.2.14)(react@19.2.4)
       '@radix-ui/colors':
         specifier: ^3.0.0
         version: 3.0.0
@@ -189,12 +189,12 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@opencode-ai/sdk':
-        specifier: ^1.14.38
-        version: 1.14.38
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
+      '@opencode-ai/sdk':
+        specifier: ^1.14.38
+        version: 1.14.38
       better-sqlite3:
         specifier: ^11.10.0
         version: 11.10.0
@@ -3146,8 +3146,20 @@ packages:
       '@types/react':
         optional: true
 
+  '@paper-design/shaders-react@0.0.76':
+    resolution: {integrity: sha512-uPJWrYRf6cJdO2H+fuXlahaqz0QjYglNAyUTaRfIInpzCa/d6guxBIK003soAZQFuQ035yg9FhtfFzKNWm+a5A==}
+    peerDependencies:
+      '@types/react': ^18 || ^19
+      react: ^18 || ^19
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+
   '@paper-design/shaders@0.0.72':
     resolution: {integrity: sha512-rk2BFuV5ood2DaivbxJC2jQMzaB434isDUzdUQ85Cy0OWnUMuxl8kyGMR74TDPyjo3EvcHIyreNLkJdRG+GfSA==}
+
+  '@paper-design/shaders@0.0.76':
+    resolution: {integrity: sha512-AcNDY4J66YQHUfQYFInkCP7M9VOje0od7wLpOR7LtCmc532opJy6ll+h1W9zBovz8tt9U7OADUmJ/qKEXyOX/A==}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -11353,7 +11365,16 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.14
 
+  '@paper-design/shaders-react@0.0.76(@types/react@19.2.14)(react@19.2.4)':
+    dependencies:
+      '@paper-design/shaders': 0.0.76
+      react: 19.2.4
+    optionalDependencies:
+      '@types/react': 19.2.14
+
   '@paper-design/shaders@0.0.72': {}
+
+  '@paper-design/shaders@0.0.76': {}
 
   '@pinojs/redact@0.4.0': {}
 
