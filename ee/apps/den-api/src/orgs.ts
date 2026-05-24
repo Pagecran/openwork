@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "@openwork-ee/den-db/drizzle"
+import { and, asc, desc, eq, inArray, isNull } from "@openwork-ee/den-db/drizzle"
 import {
   AuthSessionTable,
   AuthAccountTable,
@@ -282,7 +282,7 @@ async function listMembershipRows(userId: UserId) {
   return db
     .select()
     .from(MemberTable)
-    .where(eq(MemberTable.userId, userId))
+    .where(and(eq(MemberTable.userId, userId), isNull(MemberTable.removedAt)))
     .orderBy(asc(MemberTable.createdAt))
 }
 
@@ -868,7 +868,7 @@ export async function getOrganizationContextForUser(input: {
   const currentMemberRows = await db
     .select()
     .from(MemberTable)
-    .where(and(eq(MemberTable.organizationId, organization.id), eq(MemberTable.userId, input.userId)))
+    .where(and(eq(MemberTable.organizationId, organization.id), eq(MemberTable.userId, input.userId), isNull(MemberTable.removedAt)))
     .limit(1)
 
   const currentMember = currentMemberRows[0]
@@ -881,7 +881,7 @@ export async function getOrganizationContextForUser(input: {
   const members = await db
     .select({
       id: MemberTable.id,
-      userId: MemberTable.userId,
+      userId: AuthUserTable.id,
       role: MemberTable.role,
       createdAt: MemberTable.createdAt,
       user: {
@@ -893,7 +893,7 @@ export async function getOrganizationContextForUser(input: {
     })
     .from(MemberTable)
     .innerJoin(AuthUserTable, eq(MemberTable.userId, AuthUserTable.id))
-    .where(eq(MemberTable.organizationId, organization.id))
+    .where(and(eq(MemberTable.organizationId, organization.id), isNull(MemberTable.removedAt)))
     .orderBy(asc(MemberTable.createdAt))
 
   const invitations = await db
@@ -932,7 +932,7 @@ export async function getOrganizationContextForUser(input: {
     },
     currentMember: {
       id: currentMember.id,
-      userId: currentMember.userId,
+      userId: input.userId,
       role: currentMember.role,
       createdAt: currentMember.createdAt,
       isOwner: roleIncludesOwner(currentMember.role),
