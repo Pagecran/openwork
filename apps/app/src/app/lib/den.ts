@@ -124,7 +124,6 @@ export type DenOrgLlmProvider = {
   providerId: string;
   name: string;
   providerConfig: Record<string, unknown>;
-  credentialKind: "api_key" | "opencode_oauth";
   hasApiKey: boolean;
   hasOpencodeAuth: boolean;
   hasCredential: boolean;
@@ -927,7 +926,6 @@ function parseDenOrgLlmProvider(value: unknown): DenOrgLlmProvider | null {
     providerId: value.providerId,
     name: value.name,
     providerConfig: isRecord(value.providerConfig) ? value.providerConfig : {},
-    credentialKind: value.credentialKind === "opencode_oauth" ? "opencode_oauth" : "api_key",
     hasApiKey: value.hasApiKey === true,
     hasOpencodeAuth: value.hasOpencodeAuth === true,
     hasCredential: value.hasCredential === true || value.hasApiKey === true || value.hasOpencodeAuth === true,
