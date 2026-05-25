@@ -20,9 +20,9 @@ The production worker image is built from `packaging/docker/Dockerfile`. For sou
 - A persistent workspace directory per worker, mounted at `/workspace` inside the worker container.
 - A persistent data directory per worker, mounted at `/data` inside the worker container.
 - Operator-managed worker bearer tokens. Production deployments should set `OPENWORK_TOKEN` and `OPENWORK_HOST_TOKEN` from a secret manager or equivalent secure configuration channel.
-- A production email provider for sign-up, invitation, and verification email delivery. Configure `DEN_SMTP_*` or `DEN_RESEND_API_KEY` plus `DEN_EMAIL_FROM` before relying on user-facing email flows.
+- A production email provider for normal sign-up, invitation, and verification email delivery after first-admin bootstrap. Configure `DEN_SMTP_*` or `DEN_RESEND_API_KEY` plus `DEN_EMAIL_FROM` before relying on ongoing user-facing email flows.
 
-Generated worker tokens are a fallback for development or an operator-approved bootstrap only. When token generation is used, `/data/openwork-worker.env` contains sensitive bearer secrets and must be protected like any other secret file.
+Generated worker tokens are a fallback for an operator-approved bootstrap only. When token generation is used, `/data/openwork-worker.env` contains sensitive bearer secrets and must be protected like any other secret file.
 
 All commands below assume the repository root is available on the target host. Adjust paths to match your release checkout or deployment artifact location.
 
@@ -161,7 +161,28 @@ curl http://127.0.0.1:3005/api/den/health
 
 `DEN_STATIC_WORKER_URLS` is comma-separated. Den trims trailing slashes, probes each URL's configured health path, and assigns one not-already-active static URL per worker request.
 
-The default Compose stack does not start a local SMTP inbox. For production, configure `DEN_SMTP_HOST`, `DEN_SMTP_PORT`, `DEN_SMTP_USER`, `DEN_SMTP_PASS`, `DEN_SMTP_SECURE`, and `DEN_EMAIL_FROM`, or configure `DEN_RESEND_API_KEY` plus `DEN_EMAIL_FROM`.
+The default Compose stack does not start a local SMTP inbox. After first-admin bootstrap, production deployments should configure `DEN_SMTP_HOST`, `DEN_SMTP_PORT`, `DEN_SMTP_USER`, `DEN_SMTP_PASS`, `DEN_SMTP_SECURE`, and `DEN_EMAIL_FROM`, or configure `DEN_RESEND_API_KEY` plus `DEN_EMAIL_FROM`, for normal user-facing email flows.
+
+### First-admin bootstrap verification codes in Den logs
+
+During initial operator-controlled first-admin bootstrap, Den may emit the admin signup verification email to the Den API logs before SMTP or Resend is configured. The network/admin operator or assisting agent running the Den deployment should retrieve the active verification code from the Den API logs over an approved operator access path to the Den host/VM, then provide or enter it for the current admin `Verify your email` flow. Do not ask an admin or reviewer to run Docker locally on Windows unless that Windows machine is the Den host; the log command must run on the Den host/VM, either through SSH or directly on that host.
+
+From an operator workstation, run the log lookup on the Den host/VM over SSH:
+
+```bash
+ssh <den-operator>@<den-host> 'cd /path/to/openwork && docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml logs --since 15m den | grep "\[email\] dev email payload" | tail -n 5'
+```
+
+If already logged in on the Den host/VM, run the same Docker Compose log command there:
+
+```bash
+cd /path/to/openwork
+docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml logs --since 15m den | grep "\[email\] dev email payload" | tail -n 5
+```
+
+Select only the latest verification payload for the admin email and active bootstrap attempt. Treat the code as transient authentication material: enter or relay it only for that active flow, and never persist real codes in documentation, task files, screenshots, logs committed to the repository, or other artifacts.
+
+This log-based retrieval is the supported operator-controlled path for first-admin bootstrap when no other first-admin profile exists yet and normal email delivery has not been configured. After bootstrap, configure SMTP or Resend for ongoing production sign-up, invitation, and verification emails as described above.
 
 ## 5. Managed desktop deployment
 
@@ -210,28 +231,14 @@ After installation, the user opens OpenWork and signs in to the configured Den. 
 
 Email/password sign-in stays enabled for break-glass administrator access. Microsoft Entra ID SSO is enabled only when all provider variables below are present.
 
-This batch does not implement a first-admin/org bootstrap flow. Before enabling Entra auto-join in production, ensure a first Den administrator and target organization already exist through a supported setup path for your deployment. A dedicated first-admin/org bootstrap capability remains a future setup prerequisite. Entra auto-join only adds Microsoft users to an existing organization; it never creates the initial organization and never assigns `owner`.
-
-For disposable E2E and operator smoke-test deployments, create a demo owner and organization with the Den seed tool instead of editing database rows manually. Run this from the Compose host after the `den` service is healthy, using a temporary password kept out of shell history where possible:
-
-```bash
-read -rs -p "Demo owner password: " DEN_DEMO_OWNER_PASSWORD; echo
-export DEN_DEMO_OWNER_PASSWORD
-docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml exec \
-  -e DEN_DEMO_OWNER_EMAIL=admin@acme.test \
-  -e DEN_DEMO_OWNER_PASSWORD \
-  -e DEN_DEMO_SEED_FETCH_GITHUB=0 \
-  den pnpm --dir /app/ee/apps/den-api run seed:demo-org
-```
-
-The seed command prints the demo owner email, organization summary, and object counts, but does not print the supplied password. Use `-- --reset` at the end only for disposable environments when you intentionally want to recreate the demo organization.
+Before enabling Entra auto-join in production, ensure a first Den administrator and target organization already exist through the first-admin bootstrap path above. Entra auto-join only adds Microsoft users to an existing organization; it never creates the initial organization and never assigns `owner`.
 
 ### Entra app registration
 
 1. In Microsoft Entra admin center, create or open an App registration for Den.
 2. Add a Web redirect URI using the Den browser-facing auth origin and Better Auth callback path:
    - `http://den.company.local:3005/api/auth/callback/microsoft`
-   - For this Compose runbook's local defaults, use `http://localhost:3005/api/auth/callback/microsoft`.
+   - For a deployment accessed locally on the Den host, use `http://localhost:3005/api/auth/callback/microsoft`.
 3. Create a client secret and keep it outside source control.
 4. Configure ID token optional claims so Den receives `email` where available and `groups` for group object IDs. Den only reads the token `groups` claim; Microsoft Graph overage lookup is intentionally out of scope.
 5. Record the fixed tenant GUID. Do not use `common`, `organizations`, or `consumers` for on-prem Den SSO.
@@ -247,7 +254,7 @@ export DEN_ENTRA_CLIENT_ID=11111111-1111-1111-1111-111111111111
 export DEN_ENTRA_CLIENT_SECRET=replace-with-client-secret
 ```
 
-Use HTTPS for production Den auth origins where available, for example `https://den.company.local`. When the browser-facing Den web/auth origin is an HTTP LAN address such as `http://den.company.local:3005`, use that exact origin consistently for `DEN_BETTER_AUTH_URL`, trusted origins, desktop bootstrap, and the Entra redirect URI. Plain HTTP is accepted only for localhost, loopback, private LAN IPs, or `.local` hostnames used in LAN/on-prem testing. Do not configure wildcard Better Auth trusted origins (`*`) while Entra SSO is enabled; set explicit browser-facing origins such as `DEN_BETTER_AUTH_TRUSTED_ORIGINS=http://den.company.local:3005`.
+Use HTTPS for production Den auth origins where available, for example `https://den.company.local`. When the browser-facing Den web/auth origin is an HTTP LAN address such as `http://den.company.local:3005`, use that exact origin consistently for `DEN_BETTER_AUTH_URL`, trusted origins, desktop bootstrap, and the Entra redirect URI. Plain HTTP is accepted only for localhost, loopback, private LAN IPs, or `.local` hostnames used in LAN/on-prem deployments. Do not configure wildcard Better Auth trusted origins (`*`) while Entra SSO is enabled; set explicit browser-facing origins such as `DEN_BETTER_AUTH_TRUSTED_ORIGINS=http://den.company.local:3005`.
 
 Optional organization auto-join maps all Microsoft SSO sign-ins into one Den organization. Prefer the canonical organization ID; `DEN_ENTRA_AUTO_JOIN_ORG_SLUG` is available only as an operator convenience and must resolve to exactly one org.
 
@@ -368,7 +375,7 @@ docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev
 cd packaging/docker && docker compose -p openwork-worker-1 down
 ```
 
-Use destructive volume removal only for disposable/test stacks where data loss is intentional:
+Use destructive volume removal only when decommissioning or resetting a deployment where data loss is intentional and approved:
 
 ```bash
 docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml down -v
@@ -383,7 +390,7 @@ Worker decommission checklist:
 4. Revoke or rotate the worker's `OPENWORK_TOKEN` and `OPENWORK_HOST_TOKEN` in the secret manager.
 5. Archive or delete workspace/data directories according to retention policy.
 
-Test data cleanup should use supported application flows: delete test workers, organizations, users, invites, and sessions through Den UI/API/admin tooling available for the deployment. Avoid direct database edits or manual token-file changes during normal operations; reserve destructive container/volume reset for disposable environments.
+Deployment data cleanup should use supported application flows: remove workers, organizations, users, invites, and sessions through Den UI/API/admin tooling available for the deployment. Avoid direct database edits or manual token-file changes during normal operations; reserve destructive container/volume reset for approved decommissioning or reset scenarios.
 
 ## 10. Troubleshooting
 
@@ -394,29 +401,3 @@ Test data cleanup should use supported application flows: delete test workers, o
 - Wrong connect host in printed worker URLs: set `OPENWORK_CONNECT_HOST` to the worker DNS name and recreate the worker container.
 - Desktop opens the wrong Den: confirm the managed deployment created `%ProgramData%\OpenWork\desktop-bootstrap.json` with the expected Den URL, then redeploy or repair through the same management channel.
 - Version mismatch: rebuild and redeploy the worker image from the approved source checkout or release artifact you intend to support.
-
-## Appendix A. Non-production static worker smoke simulation
-
-Use `static-worker-smoke` only to validate Den static provisioning mechanics without a real OpenWork runtime. It is a tiny `/health` HTTP service, not an OpenWork worker, and it cannot run workspaces or sessions.
-
-PowerShell:
-
-```powershell
-Set-Location D:\openwork
-$env:DEN_PROVISIONER_MODE = "static"
-$env:DEN_STATIC_WORKER_URLS = "http://static-worker-smoke:8787"
-docker compose --profile static-worker-smoke -p openwork-den-static -f packaging/docker/docker-compose.den-dev.yml up --build -d
-curl.exe http://127.0.0.1:8787/health
-```
-
-Bash:
-
-```bash
-cd /path/to/openwork
-DEN_PROVISIONER_MODE=static DEN_STATIC_WORKER_URLS=http://static-worker-smoke:8787 \
-  docker compose --profile static-worker-smoke -p openwork-den-static \
-  -f packaging/docker/docker-compose.den-dev.yml up --build -d
-curl http://127.0.0.1:8787/health
-```
-
-Do not use `static-worker-smoke` for production or workspace/session validation.
