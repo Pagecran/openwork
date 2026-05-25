@@ -131,11 +131,18 @@ For separate hosts, keep the container port at `8787` on each host and use each 
 
 ## 4. Start Den in static mode
 
+Set the Den auth origins to the exact browser-facing Den web URL that users and managed desktops open. If this value does not match, Better Auth rejects signup, verification, and SSO requests with `Invalid origin`. Include the direct Den API origin in `DEN_BETTER_AUTH_TRUSTED_ORIGINS` and `DEN_CORS_ORIGINS` only when the deployment intentionally exposes or calls the API origin directly from browsers or desktop clients.
+
 PowerShell:
 
 ```powershell
 Set-Location D:\openwork
+$denWebOrigin = "http://den.company.local:3005"
+$denApiOrigin = "http://den.company.local:8788"
 $env:DEN_PROVISIONER_MODE = "static"
+$env:DEN_BETTER_AUTH_URL = $denWebOrigin
+$env:DEN_BETTER_AUTH_TRUSTED_ORIGINS = "$denWebOrigin,$denApiOrigin"
+$env:DEN_CORS_ORIGINS = "$denWebOrigin,$denApiOrigin"
 $env:DEN_STATIC_WORKER_URLS = "http://worker-01.company.local:8787,http://worker-02.company.local:8787"
 $env:DEN_STATIC_WORKER_HEALTH_PATH = "/health"
 $env:DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS = "10000"
@@ -149,7 +156,12 @@ Bash:
 
 ```bash
 cd /path/to/openwork
+export DEN_WEB_ORIGIN=http://den.company.local:3005
+export DEN_API_ORIGIN=http://den.company.local:8788
 export DEN_PROVISIONER_MODE=static
+export DEN_BETTER_AUTH_URL=$DEN_WEB_ORIGIN
+export DEN_BETTER_AUTH_TRUSTED_ORIGINS=$DEN_WEB_ORIGIN,$DEN_API_ORIGIN
+export DEN_CORS_ORIGINS=$DEN_WEB_ORIGIN,$DEN_API_ORIGIN
 export DEN_STATIC_WORKER_URLS=http://worker-01.company.local:8787,http://worker-02.company.local:8787
 export DEN_STATIC_WORKER_HEALTH_PATH=/health
 export DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS=10000
