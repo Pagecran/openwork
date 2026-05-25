@@ -21,7 +21,7 @@ export type DenOrgMember = {
   joinedAt: string | null;
   isOwner: boolean;
   user: {
-    id: string;
+    id: string | null;
     email: string;
     name: string;
     image: string | null;
@@ -463,7 +463,7 @@ export function parseOrgContextPayload(payload: unknown): DenOrgContext | null {
           const userEmail = asString(user.email);
           const userName = asString(user.name);
           const userIdentity = asString(user.id);
-          if (!id || !role || !userEmail || !userName || !userIdentity) {
+          if (!id || !role || !userEmail || !userName) {
             return null;
           }
 

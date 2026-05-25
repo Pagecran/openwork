@@ -79,12 +79,14 @@ export type OrganizationContext = {
   }
   members: Array<{
     id: MemberId
-    userId: UserId
+    userId: UserId | null
+    inviteId: InvitationRow["id"] | null
     role: string
     createdAt: Date
+    joinedAt: Date | null
     isOwner: boolean
     user: {
-      id: UserId
+      id: UserId | null
       email: string
       name: string
       image: string | null
@@ -850,6 +852,50 @@ export async function resolveUserOrganizations(input: {
   }
 }
 
+export type OrganizationContextMemberRow = {
+  id: MemberId
+  userId: UserId | null
+  inviteId: InvitationRow["id"] | null
+  role: string
+  createdAt: Date
+  joinedAt: Date | null
+  user: {
+    id: UserId | null
+    email: string | null
+    name: string | null
+    image: string | null
+  } | null
+  invitation: {
+    email: string | null
+  } | null
+}
+
+export function serializeOrganizationContextMembers(rows: OrganizationContextMemberRow[]): OrganizationContext["members"] {
+  return rows.flatMap((member) => {
+    const email = member.user?.email ?? member.invitation?.email
+    const name = member.user?.name ?? member.invitation?.email
+    if (!email || !name) {
+      return []
+    }
+
+    return [{
+      id: member.id,
+      userId: member.userId,
+      inviteId: member.inviteId,
+      role: member.role,
+      createdAt: member.createdAt,
+      joinedAt: member.joinedAt,
+      isOwner: roleIncludesOwner(member.role),
+      user: {
+        id: member.user?.id ?? null,
+        email,
+        name,
+        image: member.user?.image ?? null,
+      },
+    }]
+  })
+}
+
 export async function getOrganizationContextForUser(input: {
   userId: UserId
   organizationId: OrgId
@@ -881,18 +927,24 @@ export async function getOrganizationContextForUser(input: {
   const members = await db
     .select({
       id: MemberTable.id,
-      userId: AuthUserTable.id,
+      userId: MemberTable.userId,
+      inviteId: MemberTable.inviteId,
       role: MemberTable.role,
       createdAt: MemberTable.createdAt,
+      joinedAt: MemberTable.joinedAt,
       user: {
         id: AuthUserTable.id,
         email: AuthUserTable.email,
         name: AuthUserTable.name,
         image: AuthUserTable.image,
       },
+      invitation: {
+        email: InvitationTable.email,
+      },
     })
     .from(MemberTable)
-    .innerJoin(AuthUserTable, eq(MemberTable.userId, AuthUserTable.id))
+    .leftJoin(AuthUserTable, eq(MemberTable.userId, AuthUserTable.id))
+    .leftJoin(InvitationTable, eq(MemberTable.inviteId, InvitationTable.id))
     .where(and(eq(MemberTable.organizationId, organization.id), isNull(MemberTable.removedAt)))
     .orderBy(asc(MemberTable.createdAt))
 
@@ -937,10 +989,7 @@ export async function getOrganizationContextForUser(input: {
       createdAt: currentMember.createdAt,
       isOwner: roleIncludesOwner(currentMember.role),
     },
-    members: members.map((member) => ({
-      ...member,
-      isOwner: roleIncludesOwner(member.role),
-    })),
+    members: serializeOrganizationContextMembers(members),
     invitations,
     roles: [
       {
