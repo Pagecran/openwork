@@ -24,6 +24,7 @@ import {
   listWorkersQuerySchema,
   parseWorkerIdParam,
   requireCloudAccessOrPayment,
+  shouldUseSignupAutoExistingWorker,
   toInstanceResponse,
   toWorkerResponse,
   token,
@@ -106,6 +107,8 @@ const workerTokensResponseSchema = z.object({
     workspaceId: z.string().nullable(),
   }).nullable(),
 }).meta({ ref: "WorkerTokensResponse" })
+
+type WorkerRow = typeof WorkerTable.$inferSelect
 
 const organizationUnavailableSchema = z.object({
   error: z.literal("organization_unavailable"),
@@ -229,6 +232,34 @@ function staticAttachDuplicateResponse() {
   return {
     error: "worker_url_already_attached",
     message: "This static worker URL is already attached to an active Den worker.",
+  }
+}
+
+async function getExistingSignupAutoWorkerResponse(input: {
+  orgId: WorkerRow["org_id"]
+  userId: NonNullable<WorkerRow["created_by_user_id"]>
+}) {
+  const rows = await db
+    .select()
+    .from(WorkerTable)
+    .where(eq(WorkerTable.org_id, input.orgId))
+    .orderBy(desc(WorkerTable.created_at))
+    .limit(1)
+
+  const existingWorker = rows[0]
+  if (!existingWorker) {
+    return null
+  }
+
+  const instance = await getLatestWorkerInstance(existingWorker.id)
+  const tokensAndConnect = await getWorkerTokensAndConnect(existingWorker)
+  const tokens = "tokens" in tokensAndConnect ? tokensAndConnect.tokens : undefined
+
+  return {
+    worker: toWorkerResponse(existingWorker, input.userId),
+    ...(tokens ? { tokens } : {}),
+    instance: toInstanceResponse(instance),
+    launch: { mode: "existing", pollAfterMs: 0 },
   }
 }
 
@@ -480,6 +511,16 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
 
     if (!orgId) {
       return c.json({ error: "organization_unavailable" }, 400)
+    }
+
+    if (shouldUseSignupAutoExistingWorker(input)) {
+      const existingSignupAutoWorker = await getExistingSignupAutoWorkerResponse({
+        orgId,
+        userId: user.id,
+      })
+      if (existingSignupAutoWorker) {
+        return c.json(existingSignupAutoWorker)
+      }
     }
 
     if (input.destination === "local" && !input.workspacePath) {

@@ -33,10 +33,18 @@ export const createWorkerSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   destination: z.enum(["local", "cloud"]),
+  source: z.enum(["manual", "signup_auto"]).optional(),
   workspacePath: z.string().optional(),
   sandboxBackend: z.string().optional(),
   imageVersion: z.string().optional(),
 })
+
+export function shouldUseSignupAutoExistingWorker(input: {
+  destination: "local" | "cloud"
+  source?: "manual" | "signup_auto"
+}) {
+  return input.destination === "cloud" && input.source === "signup_auto"
+}
 
 export const attachStaticWorkerSchema = z.object({
   name: z.string().trim().min(1).max(255),
