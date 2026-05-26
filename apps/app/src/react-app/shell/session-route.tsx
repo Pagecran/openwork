@@ -30,6 +30,14 @@ import {
   workspaceServerId,
   type ResolvedWorkspaceEndpoint,
 } from "../../app/lib/workspace-endpoint";
+import {
+  buildWorkspaceIdAliases,
+  mergeRouteWorkspaces,
+  mergeWorkspaceSessionState,
+  normalizeWorkspaceId,
+  orderRouteWorkspaces,
+  type RouteWorkspaceModel,
+} from "./session-route-model";
 import { buildOpenworkEnvRuntimeKey } from "../../app/lib/openwork-env-runtime";
 import {
   engineInfo,
@@ -112,6 +120,7 @@ import { getDisplaySessionTitle } from "../../app/lib/session-title";
 import { useBootState } from "./boot-state";
 import {
   forgetWorkspaceMemory,
+  normalizeRememberedWorkspaceSessions,
   readActiveWorkspaceId,
   readLastSessionFor,
   readWorkspaceOrderIds,
@@ -151,9 +160,7 @@ import {
   useProviderListQuery,
 } from "../domains/connections/provider-list-query";
 
-type RouteWorkspace = OpenworkWorkspaceInfo & {
-  displayNameResolved: string;
-};
+type RouteWorkspace = RouteWorkspaceModel;
 
 function mapDesktopWorkspace(workspace: WorkspaceInfo): RouteWorkspace {
   return {
@@ -278,91 +285,6 @@ function useQueryCacheState<T>(queryKey: readonly unknown[] | null, fallback: T)
     () => (queryKey ? queryClient.getQueryData<T>(queryKey) ?? fallback : fallback),
     () => fallback,
   );
-}
-
-function mergeRouteWorkspaces(
-  serverWorkspaces: OpenworkWorkspaceInfo[],
-  desktopWorkspaces: RouteWorkspace[],
-): RouteWorkspace[] {
-  const desktopById = new Map(desktopWorkspaces.map((workspace) => [workspace.id, workspace]));
-  const desktopByPath = new Map(
-    desktopWorkspaces.flatMap((workspace) => {
-      const path = normalizeDirectoryPath(workspace.path ?? "");
-      return path ? [[path, workspace] as const] : [];
-    }),
-  );
-
-  // If a server workspace's id matches a desktop workspace marked as remote,
-  // skip the server's view entirely. The local OpenWork server may have stale
-  // registrations from earlier (buggy) activate calls that show up here as
-  // `workspaceType: "local"`, which would otherwise clobber the desktop's
-  // remote routing fields and send workspace-scoped requests back to the
-  // local server.
-  const remoteDesktopIds = new Set(
-    desktopWorkspaces.flatMap((workspace) => workspace.workspaceType === "remote" ? [workspace.id] : []),
-  );
-  const filteredServer = serverWorkspaces.filter((workspace) => !remoteDesktopIds.has(workspace.id));
-
-  const mergedServer = filteredServer.map((workspace) => {
-    const match =
-      desktopById.get(workspace.id) ??
-      desktopByPath.get(normalizeDirectoryPath(workspace.path ?? ""));
-    // For local workspaces, prefer the server's view (which knows things like
-    // `path` and per-workspace runtime fields) and only fall back to the
-    // desktop's display name when the server doesn't provide one.
-    const merged = match
-      ? {
-          ...workspace,
-          displayName: workspace.displayName?.trim()
-            ? workspace.displayName
-            : match.displayName,
-          name: match.name?.trim() ? match.name : workspace.name,
-        }
-      : workspace;
-    return {
-      ...merged,
-      displayNameResolved: workspaceLabel(merged),
-    };
-  });
-
-  const mergedIds = new Set(mergedServer.map((workspace) => workspace.id));
-  const mergedPaths = new Set(
-    mergedServer.flatMap((workspace) => {
-      const path = normalizeDirectoryPath(workspace.path ?? "");
-      return path ? [path] : [];
-    }),
-  );
-
-  const missingDesktop = desktopWorkspaces.filter((workspace) => {
-    if (mergedIds.has(workspace.id)) return false;
-    const normalizedPath = normalizeDirectoryPath(workspace.path ?? "");
-    if (normalizedPath && mergedPaths.has(normalizedPath)) return false;
-    return true;
-  });
-
-  return [...mergedServer, ...missingDesktop];
-}
-
-function orderRouteWorkspaces(workspaces: RouteWorkspace[], orderIds: string[]): RouteWorkspace[] {
-  if (orderIds.length === 0) return workspaces;
-
-  const workspaceById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
-  const ordered: RouteWorkspace[] = [];
-  const usedIds = new Set<string>();
-
-  for (const id of orderIds) {
-    const workspace = workspaceById.get(id);
-    if (!workspace || usedIds.has(id)) continue;
-    ordered.push(workspace);
-    usedIds.add(id);
-  }
-
-  for (const workspace of workspaces) {
-    if (usedIds.has(workspace.id)) continue;
-    ordered.push(workspace);
-  }
-
-  return ordered;
 }
 
 function toSessionGroups(
@@ -904,31 +826,45 @@ export function SessionRoute() {
         hostToken: resolvedHostToken || undefined,
       });
       const list = await openworkClient.listWorkspaces();
+      const mergedWorkspaces = mergeRouteWorkspaces(list.items, desktopWorkspaces, normalizedBaseUrl);
+      const workspaceAliases = buildWorkspaceIdAliases(mergedWorkspaces, normalizedBaseUrl);
+      normalizeRememberedWorkspaceSessions(workspaceAliases);
       const nextWorkspaces = orderRouteWorkspaces(
-        mergeRouteWorkspaces(list.items, desktopWorkspaces),
+        mergedWorkspaces,
         workspaceOrderIdsRef.current,
       );
+      const normalizedSessionsByWorkspaceId = mergeWorkspaceSessionState(
+        sessionsByWorkspaceIdRef.current,
+        workspaceAliases,
+      );
+      if (normalizedSessionsByWorkspaceId !== sessionsByWorkspaceIdRef.current) {
+        sessionsByWorkspaceIdRef.current = normalizedSessionsByWorkspaceId;
+      }
 
       // Preserve any sessions we already have cached so switching routes
       // doesn't erase the sidebar while we refetch.
-      const alreadyLoadedWorkspaceIds = new Set(Object.keys(sessionsByWorkspaceIdRef.current));
+      const alreadyLoadedWorkspaceIds = new Set(Object.keys(normalizedSessionsByWorkspaceId));
       const cachedEntries = nextWorkspaces.map((workspace) => ({
         workspaceId: workspace.id,
-        sessions: sessionsByWorkspaceIdRef.current[workspace.id] ?? [],
+        sessions: normalizedSessionsByWorkspaceId[workspace.id] ?? [],
       }));
       // Prefer, in order: the URL-selected workspace (if it owns the session),
       // the user's last-active workspace from localStorage, the desktop's
       // activeId, the server's activeId, then the first known workspace.
       const persistedActiveId = readActiveWorkspaceId();
+      const normalizedRouteWorkspaceId = normalizeWorkspaceId(routeWorkspaceId, workspaceAliases);
+      const normalizedPersistedActiveId = normalizeWorkspaceId(persistedActiveId, workspaceAliases);
+      const normalizedDesktopSelectedId = normalizeWorkspaceId(resolveWorkspaceListSelectedId(desktopList), workspaceAliases);
+      const normalizedServerActiveId = normalizeWorkspaceId(list.activeId?.trim() ?? "", workspaceAliases);
       let nextWorkspaceId =
-        (routeWorkspaceId && nextWorkspaces.some((w) => w.id === routeWorkspaceId)
-          ? routeWorkspaceId
+        (normalizedRouteWorkspaceId && nextWorkspaces.some((w) => w.id === normalizedRouteWorkspaceId)
+          ? normalizedRouteWorkspaceId
           : "") ||
-        (persistedActiveId && nextWorkspaces.some((w) => w.id === persistedActiveId)
-          ? persistedActiveId
+        (normalizedPersistedActiveId && nextWorkspaces.some((w) => w.id === normalizedPersistedActiveId)
+          ? normalizedPersistedActiveId
           : "") ||
-        resolveWorkspaceListSelectedId(desktopList) ||
-        list.activeId?.trim() ||
+        normalizedDesktopSelectedId ||
+        normalizedServerActiveId ||
         nextWorkspaces[0]?.id ||
         "";
       if (selectedSessionId) {
@@ -962,6 +898,14 @@ export function SessionRoute() {
       );
       setLegacySelectedWorkspaceId(nextWorkspaceId);
       writeActiveWorkspaceId(nextWorkspaceId || null);
+      const nextOrderIds = workspaceOrderIdsRef.current
+        .map((id) => normalizeWorkspaceId(id, workspaceAliases))
+        .filter((id, index, all) => id && all.indexOf(id) === index && nextWorkspaces.some((workspace) => workspace.id === id));
+      if (nextOrderIds.length !== workspaceOrderIdsRef.current.length || nextOrderIds.some((id, index) => id !== workspaceOrderIdsRef.current[index])) {
+        workspaceOrderIdsRef.current = nextOrderIds;
+        setWorkspaceOrderIds(nextOrderIds);
+        writeWorkspaceOrderIds(nextOrderIds);
+      }
       // Mark the chosen workspace as active on the server so that the
       // OpenCode engine bound to it re-reads opencode.jsonc and applies
       // permissions. Fire-and-forget; the route is idempotent and any
