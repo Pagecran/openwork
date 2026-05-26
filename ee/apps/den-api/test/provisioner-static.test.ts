@@ -20,6 +20,8 @@ let provisionerModule: typeof import("../src/workers/provisioner.js")
 let envModule: typeof import("../src/env.js")
 let workersSharedModule: typeof import("../src/routes/workers/shared.js")
 let workersCoreModule: typeof import("../src/routes/workers/core.js")
+let firstStaticWorkerModule: typeof import("../src/workers/first-static-worker.js")
+let orgsModule: typeof import("../src/orgs.js")
 let server: ReturnType<typeof Bun.serve>
 let staticWorkerUrl: string
 
@@ -81,6 +83,46 @@ function createFakeStaticAttachStore() {
   }
 
   return { data, instances, workers, tokens, selectedUrl }
+}
+
+function createFakeFirstStaticWorkerStore() {
+  const workers: Array<Record<string, unknown>> = []
+  const tokens: Array<Record<string, unknown>> = []
+
+  const data = {
+    select() {
+      return {
+        from(table: unknown) {
+          return {
+            where() {
+              return {
+                async limit() {
+                  if (table !== WorkerTable) {
+                    return []
+                  }
+                  return workers.map((entry) => ({ id: entry.id }))
+                },
+              }
+            },
+          }
+        },
+      }
+    },
+    insert(table: unknown) {
+      return {
+        async values(value: unknown) {
+          const values = Array.isArray(value) ? value : [value]
+          if (table === WorkerTable) {
+            workers.push(...values as Record<string, unknown>[])
+          } else if (table === WorkerTokenTable) {
+            tokens.push(...values as Record<string, unknown>[])
+          }
+        },
+      }
+    },
+  }
+
+  return { data, workers, tokens }
 }
 
 function createStaticAttachRouteApp(input: {
@@ -173,6 +215,8 @@ beforeAll(async () => {
   provisionerModule = await import("../src/workers/provisioner.js")
   workersSharedModule = await import("../src/routes/workers/shared.js")
   workersCoreModule = await import("../src/routes/workers/core.js")
+  firstStaticWorkerModule = await import("../src/workers/first-static-worker.js")
+  orgsModule = await import("../src/orgs.js")
 })
 
 afterAll(() => {
@@ -320,6 +364,144 @@ test("static attach route requires authentication", async () => {
 
   expect(response.status).toBe(401)
   await expect(response.json()).resolves.toEqual({ error: "unauthorized" })
+})
+
+test("first static worker auto-create creates one provisioning worker when static config is available", async () => {
+  const store = createFakeFirstStaticWorkerStore()
+  const orgId = createDenTypeId("organization")
+  const userId = createDenTypeId("user")
+  const provisioningCalls: unknown[] = []
+
+  const result = await firstStaticWorkerModule.ensureFirstStaticWorkerForOrganization({
+    organizationId: orgId,
+    userId,
+  }, {
+    data: store.data as never,
+    canCreate: () => true,
+    continueProvisioning: async (input) => {
+      provisioningCalls.push(input)
+    },
+  })
+
+  expect(result.created).toBe(true)
+  expect(store.workers).toHaveLength(1)
+  expect(store.workers[0]).toMatchObject({
+    org_id: orgId,
+    created_by_user_id: userId,
+    destination: "cloud",
+    status: "provisioning",
+    sandbox_backend: "static",
+  })
+  expect(store.tokens.map((entry) => entry.scope).sort()).toEqual(["activity", "client", "host"])
+  expect(provisioningCalls).toHaveLength(1)
+})
+
+test("first static worker auto-create is disabled outside configured static mode", async () => {
+  const store = createFakeFirstStaticWorkerStore()
+  const result = await firstStaticWorkerModule.ensureFirstStaticWorkerForOrganization({
+    organizationId: createDenTypeId("organization"),
+    userId: createDenTypeId("user"),
+  }, {
+    data: store.data as never,
+    canCreate: () => false,
+    continueProvisioning: async () => {
+      throw new Error("should not provision")
+    },
+  })
+
+  expect(result.created).toBe(false)
+  expect(store.workers).toHaveLength(0)
+  expect(store.tokens).toHaveLength(0)
+})
+
+test("first static worker auto-create does not duplicate existing organization workers", async () => {
+  const store = createFakeFirstStaticWorkerStore()
+  store.workers.push({ id: createDenTypeId("worker") })
+
+  const result = await firstStaticWorkerModule.ensureFirstStaticWorkerForOrganization({
+    organizationId: createDenTypeId("organization"),
+    userId: createDenTypeId("user"),
+  }, {
+    data: store.data as never,
+    canCreate: () => true,
+    continueProvisioning: async () => {
+      throw new Error("should not provision")
+    },
+  })
+
+  expect(result.created).toBe(false)
+  expect(store.workers).toHaveLength(1)
+  expect(store.tokens).toHaveLength(0)
+})
+
+test("first static worker auto-create relies on provisioning path for failure state", async () => {
+  const store = createFakeFirstStaticWorkerStore()
+  let provisioningAttempted = false
+
+  const result = await firstStaticWorkerModule.ensureFirstStaticWorkerForOrganization({
+    organizationId: createDenTypeId("organization"),
+    userId: createDenTypeId("user"),
+  }, {
+    data: store.data as never,
+    canCreate: () => true,
+    continueProvisioning: async () => {
+      provisioningAttempted = true
+      const worker = store.workers[0]
+      if (worker) {
+        worker.status = "failed"
+      }
+    },
+  })
+
+  expect(result.created).toBe(true)
+  expect(provisioningAttempted).toBe(true)
+  expect(store.workers[0]?.status).toBe("failed")
+})
+
+test("first static worker auto-create is enabled with static URLs even before token-map validation fails visibly", () => {
+  expect(firstStaticWorkerModule.canAutoCreateFirstStaticWorker()).toBe(true)
+})
+
+test("organization creation service path invokes first static worker helper without corrupting org creation", async () => {
+  const organizationId = createDenTypeId("organization")
+  const userId = createDenTypeId("user")
+  const calls: unknown[] = []
+
+  const result = await orgsModule.createOrganizationForUserWithDeps({
+    userId,
+    name: "  Static Org  ",
+  }, {
+    createOrganizationRecord: async (input) => {
+      calls.push({ create: input })
+      return organizationId
+    },
+    ensureFirstStaticWorker: async (input) => {
+      calls.push({ ensure: input })
+      return { created: true, workerId: createDenTypeId("worker") }
+    },
+  })
+
+  expect(result).toBe(organizationId)
+  expect(calls).toEqual([
+    { create: { userId, name: "Static Org" } },
+    { ensure: { organizationId, userId, name: "Default static worker" } },
+  ])
+})
+
+test("organization creation service path preserves org creation when first static worker helper throws", async () => {
+  const organizationId = createDenTypeId("organization")
+
+  const result = await orgsModule.createOrganizationForUserWithDeps({
+    userId: createDenTypeId("user"),
+    name: "Static Org",
+  }, {
+    createOrganizationRecord: async () => organizationId,
+    ensureFirstStaticWorker: async () => {
+      throw new Error("synthetic static worker failure")
+    },
+  })
+
+  expect(result).toBe(organizationId)
 })
 
 test("static attach route succeeds for organization admin without token echo", async () => {
