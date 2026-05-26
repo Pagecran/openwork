@@ -147,6 +147,13 @@ export type DenOrgLlmProviderConnection = DenOrgLlmProvider & {
   opencodeAuth: string | null;
 };
 
+export type DenManagedProviderSyncResult = {
+  status: "applied" | "failed";
+  providerCount: number;
+  revision: string;
+  reason?: string;
+};
+
 export type DenPluginConfigObjectType = "skill" | "agent" | "command" | "tool" | "mcp" | "hook" | "context" | "custom";
 
 export type DenPluginConfigObjectVersion = {
@@ -975,6 +982,19 @@ function getDenOrgLlmProviderConnection(payload: unknown): DenOrgLlmProviderConn
     ...provider,
     apiKey: typeof payload.llmProvider.apiKey === "string" ? payload.llmProvider.apiKey : null,
     opencodeAuth: typeof payload.llmProvider.opencodeAuth === "string" ? payload.llmProvider.opencodeAuth : null,
+  };
+}
+
+function getDenManagedProviderSyncResult(payload: unknown): DenManagedProviderSyncResult | null {
+  if (!isRecord(payload)) return null;
+  if (payload.status !== "applied" && payload.status !== "failed") return null;
+  if (typeof payload.providerCount !== "number" || !Number.isInteger(payload.providerCount) || payload.providerCount < 0) return null;
+  if (typeof payload.revision !== "string") return null;
+  return {
+    status: payload.status,
+    providerCount: payload.providerCount,
+    revision: payload.revision,
+    ...(typeof payload.reason === "string" ? { reason: payload.reason } : {}),
   };
 }
 
@@ -1823,6 +1843,27 @@ export function createDenClient(options: { baseUrl: string; apiBaseUrl?: string 
         throw new DenApiError(500, "invalid_llm_provider_payload", "LLM provider response was missing connection details.");
       }
       return provider;
+    },
+
+    async syncWorkerManagedProviders(orgId: string, workerId: string): Promise<DenManagedProviderSyncResult> {
+      const payload = await requestJson<unknown>(
+        baseUrls,
+        `/v1/workers/${encodeURIComponent(workerId)}/managed-providers/sync`,
+        {
+          method: "POST",
+          token,
+          organizationId: orgId,
+          body: {},
+        },
+      );
+      const result = getDenManagedProviderSyncResult(payload);
+      if (!result) {
+        throw new DenApiError(500, "invalid_managed_provider_sync_payload", "Managed provider sync response was invalid.");
+      }
+      if (result.status !== "applied") {
+        throw new DenApiError(502, "managed_provider_sync_failed", result.reason ?? "Managed provider sync failed.");
+      }
+      return result;
     },
 
     async listOrgMarketplaces(orgId: string): Promise<DenOrgMarketplace[]> {
