@@ -668,7 +668,7 @@ function WorkspaceHeader({
       {...props}
       className={cn(
         "group-hover/workspace-header:bg-sidebar-accent group-hover/workspace-header:text-sidebar-accent-foreground mac:group-hover/workspace-header:bg-black/5 dark:mac:group-hover/workspace-header:bg-white/10",
-        statusLabel && "h-10",
+        statusLabel ? "h-auto min-h-12 items-start py-2" : "h-8",
       )}
       onClick={(event) => {
         onClick?.(event);
@@ -678,14 +678,13 @@ function WorkspaceHeader({
       <WorkspaceIcon seed={workspaceLabel(workspace)} sizeClass="size-4" />
       <div
         className={cn(
-          "min-w-0 flex-1 cursor-grab touch-none transition-[padding] duration-75 active:cursor-grabbing group-hover/workspace-header:pr-16 group-has-[[data-workspace-actions]:focus-within]/workspace-header:pr-16 group-has-data-popup-open/workspace-header:pr-11 group-hover/workspace-header:group-has-data-popup-open/workspace-header:pr-16 pr-2",
-          isLoading && "pr-6",
+          "min-w-0 flex-1 cursor-grab touch-none overflow-hidden pr-20 active:cursor-grabbing",
         )}
         onPointerDown={onTitlePointerDown}
       >
         <span className="block truncate">{workspaceLabel(workspace)}</span>
         {statusLabel ? (
-          <span className={cn("block text-xs", isError ? "text-destructive" : "text-muted-foreground")}>
+          <span className={cn("block truncate text-xs leading-4", isError ? "text-destructive" : "text-muted-foreground")}>
             {statusLabel}
           </span>
         ) : null}
@@ -792,7 +791,7 @@ function WorkspaceSidebarGroup({
                 isLoading={group.status === "loading" || isConnecting}
                 onTitlePointerDown={onWorkspaceTitlePointerDown}
               />
-              <div data-workspace-actions className="group/workspace-actions absolute right-9 top-1/2 flex -translate-y-1/2 items-center gap-1">
+              <div data-workspace-actions className="group/workspace-actions pointer-events-none absolute right-9 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 group-hover/workspace-header:pointer-events-auto group-hover/workspace-header:opacity-100 group-focus-within/workspace-actions:pointer-events-auto group-focus-within/workspace-actions:opacity-100 group-has-data-popup-open/workspace-header:pointer-events-auto group-has-data-popup-open/workspace-header:opacity-100">
                 <Button
                   variant="ghost"
                   size="icon"

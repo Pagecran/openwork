@@ -121,6 +121,12 @@ import { workspaceSwatchColor } from "../domains/session/sidebar/utils";
 import { recordInspectorEvent } from "./app-inspector";
 import { ensureDesktopLocalOpenworkConnection } from "./desktop-local-openwork";
 import { resolveOpenworkConnection } from "./openwork-connection";
+import {
+  buildWorkspaceIdAliases,
+  mergeRouteWorkspaces,
+  normalizeWorkspaceId,
+  type RouteWorkspaceModel,
+} from "./session-route-model";
 import { abortSessionSafe } from "../../app/lib/opencode-session";
 import { useReloadCoordinator } from "./reload-coordinator";
 import { buildFeedbackUrl } from "../../app/lib/feedback";
@@ -140,9 +146,7 @@ import {
 } from "../domains/settings/openai-image-extension";
 import { OLLAMA_PROVIDER_CONFIG, type LocalProviderInstallInput } from "../domains/settings/openai-image-extension";
 
-type RouteWorkspace = OpenworkWorkspaceInfo & {
-  displayNameResolved: string;
-};
+type RouteWorkspace = RouteWorkspaceModel;
 
 const ROUTE_OPENWORK_CAPABILITIES: OpenworkServerCapabilities = {
   skills: { read: true, write: true, source: "openwork" },
@@ -212,55 +216,6 @@ async function requestOpenAiImage(input: { apiKey: string; prompt: string }) {
     throw Object.assign(new Error(message), { payload, status: response.status, model: OPENAI_IMAGE_MODEL });
   }
   return payload;
-}
-
-function mergeRouteWorkspaces(
-  serverWorkspaces: OpenworkWorkspaceInfo[],
-  desktopWorkspaces: RouteWorkspace[],
-): RouteWorkspace[] {
-  const desktopById = new Map(desktopWorkspaces.map((workspace) => [workspace.id, workspace]));
-  const desktopByPath = new Map(
-    desktopWorkspaces.flatMap((workspace) => {
-      const path = normalizeDirectoryPath(workspace.path ?? "");
-      return path ? [[path, workspace] as const] : [];
-    }),
-  );
-
-  const mergedServer = serverWorkspaces.map((workspace) => {
-    const match =
-      desktopById.get(workspace.id) ??
-      desktopByPath.get(normalizeDirectoryPath(workspace.path ?? ""));
-    const merged = match
-      ? {
-          ...workspace,
-          displayName: workspace.displayName?.trim()
-            ? workspace.displayName
-            : match.displayName,
-          name: match.name?.trim() ? match.name : workspace.name,
-        }
-      : workspace;
-    return {
-      ...merged,
-      displayNameResolved: workspaceLabel(merged),
-    };
-  });
-
-  const mergedIds = new Set(mergedServer.map((workspace) => workspace.id));
-  const mergedPaths = new Set(
-    mergedServer.flatMap((workspace) => {
-      const path = normalizeDirectoryPath(workspace.path ?? "");
-      return path ? [path] : [];
-    }),
-  );
-
-  const missingDesktop = desktopWorkspaces.filter((workspace) => {
-    if (mergedIds.has(workspace.id)) return false;
-    const normalizedPath = normalizeDirectoryPath(workspace.path ?? "");
-    if (normalizedPath && mergedPaths.has(normalizedPath)) return false;
-    return true;
-  });
-
-  return [...mergedServer, ...missingDesktop];
 }
 
 function reconcileSelectedWorkspaceId(
@@ -1294,17 +1249,19 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
         hostToken: resolvedHostToken || undefined,
       });
       const list = await client.listWorkspaces();
-      const serverWorkspaceIds = new Set(list.items.map((workspace) => workspace.id));
-      const nextWorkspaces = mergeRouteWorkspaces(list.items, desktopWorkspaces);
+      const nextWorkspaces = mergeRouteWorkspaces(list.items, desktopWorkspaces, normalizedBaseUrl);
+      const workspaceAliases = buildWorkspaceIdAliases(nextWorkspaces, normalizedBaseUrl);
       const sessionEntries = await Promise.all(
         nextWorkspaces.map(async (workspace) => {
-          if (!serverWorkspaceIds.has(workspace.id)) {
+          const endpoint = resolveWorkspaceEndpoint(workspace, { baseUrl: normalizedBaseUrl, token: resolvedToken });
+          if (!endpoint) {
             return { workspaceId: workspace.id, sessions: [], error: null as string | null };
           }
           try {
-            const response = await client.listSessions(workspace.id, { limit: 200 });
+            const isRemoteOpenworkWorkspace = workspace.workspaceType === "remote" && workspace.remoteType !== "opencode";
+            const response = await endpoint.client.listSessions(endpoint.workspaceId, { limit: 200 });
             const workspaceRoot = normalizeDirectoryPath(workspace.path ?? "");
-            const items = workspaceRoot
+            const items = workspaceRoot && !isRemoteOpenworkWorkspace
               ? (response.items ?? []).filter((session: any) =>
                   normalizeDirectoryPath(session?.directory ?? "") === workspaceRoot,
                 )
@@ -1354,8 +1311,8 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
         return next;
       });
       setLegacySelectedWorkspaceId((current) => {
-        const sessionWorkspaceId = findSessionWorkspaceId(navigationSessionId, sessionEntries);
-        const preferred = routeWorkspaceId || sessionWorkspaceId || navigationWorkspaceId || current || readActiveWorkspaceId() || "";
+        const sessionWorkspaceId = normalizeWorkspaceId(findSessionWorkspaceId(navigationSessionId, sessionEntries), workspaceAliases);
+        const preferred = normalizeWorkspaceId(routeWorkspaceId || sessionWorkspaceId || navigationWorkspaceId || current || readActiveWorkspaceId() || "", workspaceAliases);
         const next = reconcileSelectedWorkspaceId(preferred, list, desktopList, nextWorkspaces);
         writeActiveWorkspaceId(next || null);
         return next;

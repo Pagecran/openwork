@@ -123,6 +123,50 @@ describe("session route workspace model", () => {
     });
   });
 
+  test("collapses screenshot-shaped local mirror and default static worker groups", () => {
+    const localServerUrl = "http://127.0.0.1:8787";
+    const remoteWorkerUrl = "http://worker-host.example:8787";
+    const merged = mergeRouteWorkspaces(
+      [workspace({ id: "ws_runtime", name: "workspace", path: "/workspace" })],
+      [{
+        ...workspace({
+          id: "rem_ws_runtime",
+          name: "Default static worker",
+          displayName: "Default static worker",
+          workspaceType: "remote",
+          remoteType: "openwork",
+          baseUrl: remoteWorkerUrl,
+          openworkHostUrl: remoteWorkerUrl,
+          openworkWorkspaceId: "ws_runtime",
+        }),
+        displayNameResolved: "Default static worker",
+      }],
+      localServerUrl,
+    );
+    const aliases = buildWorkspaceIdAliases(merged, localServerUrl);
+    const sessions = mergeWorkspaceSessionState({
+      ws_runtime: [{ id: "ses_duplicate", title: "Repeated task" }],
+      rem_ws_runtime: [
+        { id: "ses_duplicate", title: "Repeated task" },
+        { id: "ses_remote_only", title: "Remote-only task" },
+      ],
+    }, aliases);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.id).toBe("rem_ws_runtime");
+    expect(merged[0]?.displayName).toBe("Default static worker");
+    expect(merged[0]?.workspaceType).toBe("remote");
+    expect(merged[0]?.baseUrl).toBe(remoteWorkerUrl);
+    expect(merged.some((item) => item.name === "workspace" && item.workspaceType === "local")).toBe(false);
+    expect(normalizeWorkspaceId("ws_runtime", aliases)).toBe("rem_ws_runtime");
+    expect(sessions).toEqual({
+      rem_ws_runtime: [
+        { id: "ses_duplicate", title: "Repeated task" },
+        { id: "ses_remote_only", title: "Remote-only task" },
+      ],
+    });
+  });
+
   test("normalizes remembered active workspace, session, and ordering state", () => {
     writeActiveWorkspaceId("ws_c52ddf65534b");
     writeLastSessionFor("ws_c52ddf65534b", "ses_remote");
