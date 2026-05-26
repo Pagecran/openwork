@@ -1,0 +1,15 @@
+Command: nomadworks_validate
+
+Result: FAIL
+
+Summary:
+- Validation failed on pre-existing repository baseline issues unrelated to this task.
+- Root codemap links reference missing files such as `Agents_Common.md`, `docs/core/agent_orchestration.md`, and `docs/architecture/TECHNICAL_ARCHITECTURE.md`.
+- The validator also reports broad pre-existing missing CodeMap coverage across the repository.
+
+Representative failures:
+- D:\openwork\codemap.yml: link path does not exist: Agents_Common.md
+- D:\openwork\codemap.yml: link path does not exist: ./docs/core/agent_orchestration.md
+- D:\openwork\codemap.yml: link path does not exist: ./docs/architecture/TECHNICAL_ARCHITECTURE.md
+- Missing CodeMap: Directory 'apps' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'apps\desktop' contains source but has no codemap.yml.

@@ -1,0 +1,20 @@
+Command: git status --short --branch && git log --oneline -10 && git merge-base --is-ancestor f0f8ce62254a0826e1825a5e93d8974b2d2be420 HEAD
+
+## dev-0.13.13-integration...upstream/dev [ahead 30, behind 17]
+?? .codenomad/
+?? .nomadworks/
+?? codemap.yml
+?? docs/scrs/
+?? evidences/
+?? tasks/
+f0f8ce622 fix: TASK-2026-05-26-010 dedupe remote workspaces
+63196ada0 fix: TASK-2026-05-26-007 restore signup worker launch
+170a9c461 fix: TASK-2026-05-26-005 auto-create first static worker
+4672dc5eb merge: TASK-2026-05-26-002 sync upstream dev
+5ce6eca10 fix: TASK-2026-05-26-001 repair Den static connect flow
+d65c66aa8 chore: remove share functionality
+24fe8b9aa fix(desktop): preserve remote workspace host connection (#1956)
+7b43b197a feat(den): add org-scoped SCIM and SSO admin flows (#1556)
+aa7474742 fix(desktop): allow Voice Mode microphone capture (#1953)
+afb0fe151 fix(app): keep voice mode available across sessions (#1952)
+ANCESTOR_OK

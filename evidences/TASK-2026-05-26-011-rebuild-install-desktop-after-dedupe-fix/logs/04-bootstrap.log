@@ -1,0 +1,15 @@
+Command: Read %ProgramData%\OpenWork\desktop-bootstrap.json and validate host strings
+
+BootstrapPath: C:\ProgramData\OpenWork\desktop-bootstrap.json
+Exists: True
+ContainsVm158: True
+ContainsVm155: False
+ContainsVm156: False
+ContainsVm157: False
+
+Bootstrap contents:
+{
+  "apiBaseUrl": "http://192.168.1.51:3005/api/den",
+  "requireSignin": true,
+  "baseUrl": "http://192.168.1.51:3005"
+}
