@@ -1,0 +1,12 @@
+Command: Read managed bootstrap file and verify no OpenWork process is running
+
+Output:
+BOOTSTRAP_FILE=C:\ProgramData\OpenWork\desktop-bootstrap.json
+{
+  "apiBaseUrl": "http://192.168.1.51:3005/api/den",
+  "requireSignin": true,
+  "baseUrl": "http://192.168.1.51:3005"
+}
+BOOTSTRAP_TARGET_VM158=yes
+BOOTSTRAP_OLD_VM_REFERENCES=no
+OPENWORK_PROCESS_RUNNING=no

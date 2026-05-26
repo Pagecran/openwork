@@ -1,0 +1,41 @@
+Command: pnpm --filter @openwork/desktop package:electron
+
+Key output:
+> @openwork/desktop@0.13.12 package:electron D:\openwork\apps\desktop
+> pnpm run build:electron && pnpm exec electron-builder --config electron-builder.yml
+
+> @openwork/desktop@0.13.12 build:electron D:\openwork\apps\desktop
+> node ./scripts/electron-build.mjs
+
+OpenCode sidecar already present (1.14.38).
+{
+  "ok": true,
+  "skipped": true,
+  "reason": "computer-use-helper-is-macos-only"
+}
+
+> openwork-server@0.13.12 build D:\openwork\apps\server
+> tsc -p tsconfig.json
+
+> @openwork/app@0.13.12 build D:\openwork\apps\app
+> vite build
+
+✓ built in 7.14s
+Electron desktop bridge covers 50 renderer methods.
+{
+  "ok": true,
+  "renderer": "apps/app/dist",
+  "electronMain": "apps/desktop/electron/main.mjs",
+  "electronPreload": "apps/desktop/electron/preload.mjs"
+}
+• electron-builder  version=25.1.8 os=10.0.26200
+• loaded configuration  file=D:\openwork\apps\desktop\electron-builder.yml
+• packaging       platform=win32 arch=x64 electron=35.7.5 appOutDir=dist-electron\win-unpacked
+• building        target=nsis file=dist-electron\openwork-win-x64-0.13.12.exe archs=x64 oneClick=true perMachine=false
+• building block map  blockMapFile=dist-electron\openwork-win-x64-0.13.12.exe.blockmap
+
+Artifact metadata:
+ARTIFACT_PATH=D:\openwork\apps\desktop\dist-electron\openwork-win-x64-0.13.12.exe
+ARTIFACT_SIZE=231422263
+ARTIFACT_MTIME=2026-05-26T20:34:13.3908521Z
+ARTIFACT_VERSION=0.13.12

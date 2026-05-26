@@ -1,0 +1,24 @@
+Command: git status --short && git rev-parse HEAD && git branch --show-current && git merge-base --is-ancestor 7b82836ec HEAD
+
+Output:
+ M tasks/current.md
+?? .codenomad/
+?? .nomadworks/
+?? codemap.yml
+?? docs/scrs/
+?? evidences/TASK-2026-05-23-009-provider-credential-stack-restructure-e2e/
+?? evidences/TASK-2026-05-24-002-runbook-verbatim-deployment-test/
+?? evidences/TASK-2026-05-25-001-den-org-member-joined-at-status/
+?? evidences/TASK-2026-05-25-003-align-desktop-version-metadata/
+?? evidences/TASK-2026-05-25-004-desktop-shared-workspaces-empty/
+?? evidences/TASK-2026-05-25-005-make-test-static-worker-connectable/
+?? evidences/TASK-2026-05-25-006-clean-room-den-static-validation/
+?? evidences/TASK-2026-05-25-009-desktop-connect-ready-worker-fails/
+?? evidences/TASK-2026-05-26-001-den-static-e2e-recovery/
+?? evidences/TASK-2026-05-26-005-auto-create-first-static-worker/
+?? evidences/TASK-2026-05-26-007-restore-generic-signup-worker-launch/
+?? evidences/TASK-2026-05-26-010-fix-remote-workspace-dedupe-empty-session-state/
+?? tasks/todo/
+7b82836ecbfefc1300493984ed9deeb9b391fcd2
+dev-0.13.13-integration
+TARGET_COMMIT_ANCESTOR=yes

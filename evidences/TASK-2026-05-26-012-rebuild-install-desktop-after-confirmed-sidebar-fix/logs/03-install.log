@@ -1,0 +1,8 @@
+Command: Start-Process -FilePath "D:\openwork\apps\desktop\dist-electron\openwork-win-x64-0.13.12.exe" -ArgumentList "/S" -Wait -PassThru
+
+Output:
+INSTALL_EXIT_CODE=0
+INSTALLED_EXE=C:\Users\Admin\AppData\Local\Programs\@openworkdesktop\OpenWork.exe
+INSTALLED_SIZE=201246720
+INSTALLED_MTIME=2026-05-26T20:34:10.0000000Z
+INSTALLED_VERSION=0.13.12.0

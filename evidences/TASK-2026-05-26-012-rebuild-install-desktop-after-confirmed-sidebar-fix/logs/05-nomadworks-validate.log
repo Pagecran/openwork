@@ -1,0 +1,17 @@
+Command: nomadworks_validate
+
+Result: FAIL
+
+Top reported baseline issues:
+- D:\openwork\codemap.yml: link path does not exist: Agents_Common.md
+- D:\openwork\codemap.yml: link path does not exist: ./docs/core/agent_orchestration.md
+- D:\openwork\codemap.yml: link path does not exist: ./docs/architecture/TECHNICAL_ARCHITECTURE.md
+- Missing CodeMap: Directory 'apps' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'apps\app' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'apps\desktop' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'docs\scrs' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'tasks\done' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'tasks\todo' contains source but has no codemap.yml.
+
+Note:
+Validation failures were pre-existing repository baseline documentation/CodeMap issues and are unrelated to the desktop rebuild/install work completed in this task.
