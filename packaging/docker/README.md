@@ -67,12 +67,13 @@ Optional env vars (via `.env` or `export`):
 - `DEN_PROVISIONER_MODE` — `stub`, `static`, `render`, or `daytona` (defaults to `stub`)
 - `DEN_WORKER_URL_TEMPLATE` — stub worker URL template with `{workerId}` placeholder
 - `DEN_STATIC_WORKER_URLS` — comma-separated LAN/local OpenWork worker URLs used when `DEN_PROVISIONER_MODE=static`; each URL is assigned to at most one active static worker instance
+- `DEN_STATIC_WORKER_TOKEN_MAP_JSON` — JSON object keyed by static worker URL with `clientToken` and `hostToken` values used to verify and persist the runtime token contract
 - `DEN_STATIC_WORKER_HEALTH_PATH` — health path checked for static workers (defaults to `/health`)
 - `DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS` — static worker health timeout (defaults to `10000`)
 
 ### On-prem/static worker mode
 
-Use static mode when Den is self-hosted on a LAN and workers are already running on local infrastructure. Den does not launch those workers; it assigns one configured URL that is not already used by an active static `worker_instance` to each cloud/shared worker request, checks the worker health endpoint, records a `worker_instance`, and marks the worker `healthy` only when the endpoint responds successfully.
+Use static mode when Den is self-hosted on a LAN and workers are already running on local infrastructure. Den does not launch those workers; it assigns one configured URL that is not already used by an active static `worker_instance` to each cloud/shared worker request, checks the worker health endpoint, verifies the configured runtime client/host tokens against `/workspaces` and `/env/keys`, requires `/workspaces` to return a selectable workspace id, records a `worker_instance`, and marks the worker `healthy` only when that connect contract succeeds.
 
 The real worker container path is the production container in this directory (`Dockerfile` + `docker-compose.yml`). The image builds the worker from the source checkout used as the Docker build context; use an approved checkout or release artifact for the version you intend to support.
 

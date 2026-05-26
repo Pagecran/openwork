@@ -18,6 +18,10 @@ function workspaceDirectoryCandidates(workspace) {
     .filter(Boolean);
 }
 
+export function preferredOpenworkDiscoveryToken(input) {
+  return trim(input?.openworkClientToken) || trim(input?.openworkToken) || null;
+}
+
 export function selectOpenworkWorkspaceForConnection(list, directory) {
   const items = Array.isArray(list?.items)
     ? list.items

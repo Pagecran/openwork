@@ -173,6 +173,23 @@ curl http://127.0.0.1:3005/api/den/health
 
 `DEN_STATIC_WORKER_URLS` is comma-separated. Den trims trailing slashes, probes each URL's configured health path, and assigns one not-already-active static URL per worker request.
 
+For Den-managed shared worker creation in static mode, also configure `DEN_STATIC_WORKER_TOKEN_MAP_JSON` with the runtime token pair for each URL so Den can persist the same client/host tokens it verifies against the worker before marking that worker healthy. Example:
+
+```json
+{
+  "http://worker-01.company.local:8787": {
+    "clientToken": "<worker-01-client-token>",
+    "hostToken": "<worker-01-host-token>"
+  },
+  "http://worker-02.company.local:8787": {
+    "clientToken": "<worker-02-client-token>",
+    "hostToken": "<worker-02-host-token>"
+  }
+}
+```
+
+Inject that JSON through the deployment secret manager or equivalent secure operator channel. Do not commit real token values.
+
 The default Compose stack does not start a local SMTP inbox. After first-admin bootstrap, production deployments should configure `DEN_SMTP_HOST`, `DEN_SMTP_PORT`, `DEN_SMTP_USER`, `DEN_SMTP_PASS`, `DEN_SMTP_SECURE`, and `DEN_EMAIL_FROM`, or configure `DEN_RESEND_API_KEY` plus `DEN_EMAIL_FROM`, for normal user-facing email flows.
 
 ### First-admin bootstrap verification codes in Den logs
@@ -318,7 +335,7 @@ Troubleshooting:
 5. Expected behavior:
    - The worker briefly appears as `provisioning`/`Starting`.
    - Den calls `/health` on the first unassigned URL from `DEN_STATIC_WORKER_URLS`.
-   - The worker becomes `healthy` and its instance/provider metadata shows `static`.
+   - The worker becomes `healthy` and its instance/provider metadata shows `static` only after Den verifies the configured worker client/host tokens against the runtime and resolves a selectable workspace id from `/workspaces`.
    - Adding another shared worker consumes the next URL in `DEN_STATIC_WORKER_URLS`.
    - If every static URL is already assigned to an active worker, the new request fails with a clear "No available static worker URL remains" error.
 

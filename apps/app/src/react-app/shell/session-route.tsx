@@ -2570,6 +2570,11 @@ export function SessionRoute() {
   const handleCreateRemoteWorkspace = useCallback(async (input: {
     openworkHostUrl?: string | null;
     openworkToken?: string | null;
+    openworkClientToken?: string | null;
+    openworkHostToken?: string | null;
+    openworkDenBaseUrl?: string | null;
+    openworkDenOrgId?: string | null;
+    openworkDenWorkerId?: string | null;
     directory?: string | null;
     displayName?: string | null;
   }) => {
@@ -2582,6 +2587,11 @@ export function SessionRoute() {
         baseUrl: baseUrlValue,
         openworkHostUrl: baseUrlValue,
         openworkToken: input.openworkToken?.trim() || null,
+        openworkClientToken: input.openworkClientToken?.trim() || null,
+        openworkHostToken: input.openworkHostToken?.trim() || null,
+        openworkDenBaseUrl: input.openworkDenBaseUrl?.trim() || null,
+        openworkDenOrgId: input.openworkDenOrgId?.trim() || null,
+        openworkDenWorkerId: input.openworkDenWorkerId?.trim() || null,
         displayName: input.displayName?.trim() || null,
         directory: input.directory?.trim() || null,
         remoteType: "openwork",

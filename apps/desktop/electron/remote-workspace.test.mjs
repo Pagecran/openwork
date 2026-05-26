@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   openworkWorkspaceDisplayName,
+  preferredOpenworkDiscoveryToken,
   selectOpenworkWorkspaceForConnection,
 } from "./remote-workspace.mjs";
 
@@ -96,6 +97,25 @@ describe("openworkWorkspaceDisplayName", () => {
         displayName: "Demo",
       }),
       "Demo",
+    );
+  });
+});
+
+describe("preferredOpenworkDiscoveryToken", () => {
+  it("prefers the explicit client token over the generic token", () => {
+    assert.equal(
+      preferredOpenworkDiscoveryToken({
+        openworkToken: "owner-token",
+        openworkClientToken: "client-token",
+      }),
+      "client-token",
+    );
+  });
+
+  it("falls back to the generic token when no client token exists", () => {
+    assert.equal(
+      preferredOpenworkDiscoveryToken({ openworkToken: "owner-token" }),
+      "owner-token",
     );
   });
 });

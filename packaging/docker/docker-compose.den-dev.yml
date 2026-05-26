@@ -23,6 +23,8 @@
 #   DEN_STATIC_WORKER_URLS  — comma-separated LAN/OpenWork worker URLs for static mode
 #                           — each URL is assigned to at most one active worker_instance
 #                           — for the smoke-test service below, use http://static-worker-smoke:8787
+#   DEN_STATIC_WORKER_TOKEN_MAP_JSON
+#                           — JSON object keyed by worker URL with clientToken/hostToken pairs for real static workers
 #   DEN_STATIC_WORKER_HEALTH_PATH / DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS
 #                           — optional static worker health-check overrides
 #   DEN_ENTRA_TENANT_ID / DEN_ENTRA_CLIENT_ID / DEN_ENTRA_CLIENT_SECRET
@@ -93,6 +95,7 @@ services:
       PROVISIONER_MODE: ${DEN_PROVISIONER_MODE:-stub}
       WORKER_URL_TEMPLATE: ${DEN_WORKER_URL_TEMPLATE:-}
       STATIC_WORKER_URLS: ${DEN_STATIC_WORKER_URLS:-}
+      STATIC_WORKER_TOKEN_MAP_JSON: ${DEN_STATIC_WORKER_TOKEN_MAP_JSON:-}
       STATIC_WORKER_HEALTH_PATH: ${DEN_STATIC_WORKER_HEALTH_PATH:-/health}
       STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS: ${DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS:-10000}
       STATIC_WORKER_HEALTHCHECK_INTERVAL_MS: ${DEN_STATIC_WORKER_HEALTHCHECK_INTERVAL_MS:-1000}

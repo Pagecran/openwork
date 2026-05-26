@@ -151,7 +151,7 @@ beforeAll(async () => {
       }
       if (url.pathname === "/workspaces") {
         return authorization === "Bearer valid-client-token"
-          ? Response.json({ items: [], activeId: null })
+          ? Response.json({ items: [{ id: "ws_static_valid", path: "/workspace" }], activeId: "ws_static_valid" })
           : Response.json({ error: "unauthorized" }, { status: 401 })
       }
       if (url.pathname === "/env/keys") {
@@ -515,6 +515,51 @@ test("static attach worker token verification rejects invalid client and host to
   }
 })
 
+test("static runtime connectable verification requires a selectable workspace", async () => {
+  const noWorkspaceServer = Bun.serve({
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url)
+      const authorization = request.headers.get("authorization")
+      const hostToken = request.headers.get("x-openwork-host-token")
+      if (url.pathname === "/workspaces") {
+        return authorization === "Bearer valid-client-token"
+          ? Response.json({ items: [], activeId: null })
+          : Response.json({ error: "unauthorized" }, { status: 401 })
+      }
+      if (url.pathname === "/env/keys") {
+        return hostToken === "valid-host-token"
+          ? Response.json({ keys: [] })
+          : Response.json({ error: "forbidden" }, { status: 403 })
+      }
+      return new Response("not found", { status: 404 })
+    },
+  })
+
+  try {
+    await expect(workersSharedModule.verifyStaticWorkerRuntimeConnectable({
+      url: `http://127.0.0.1:${noWorkspaceServer.port}`,
+      clientToken: "valid-client-token",
+      hostToken: "valid-host-token",
+      timeoutMs: 1000,
+    })).rejects.toThrow("returned no selectable workspace from /workspaces")
+  } finally {
+    noWorkspaceServer.stop(true)
+  }
+})
+
+test("static runtime connectable verification returns resolved workspace connect payload", async () => {
+  await expect(workersSharedModule.verifyStaticWorkerRuntimeConnectable({
+    url: staticWorkerUrl,
+    clientToken: "valid-client-token",
+    hostToken: "valid-host-token",
+    timeoutMs: 1000,
+  })).resolves.toEqual({
+    workspaceId: "ws_static_valid",
+    openworkUrl: `${staticWorkerUrl}/w/ws_static_valid`,
+  })
+})
+
 test("static provisioner fails clearly when no worker URLs are configured", async () => {
   await expect(provisionerModule.provisionStaticWorker(
     {
@@ -597,6 +642,39 @@ test("static env validation rejects invalid URL, protocol, health path, and time
   expect(parsed.issues.some((issue) => issue.path === "STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS")).toBe(true)
   expect(parsed.issues.some((issue) => issue.path === "STATIC_WORKER_HEALTHCHECK_INTERVAL_MS")).toBe(true)
   expect(parsed.issues.some((issue) => issue.path === "STATIC_WORKER_RESERVATION_TTL_MS")).toBe(true)
+})
+
+test("static env validation parses normalized token maps", () => {
+  const parsed = envModule.parseStaticWorkersEnv({
+    STATIC_WORKER_URLS: "https://worker.example.com/",
+    STATIC_WORKER_TOKEN_MAP_JSON: JSON.stringify({
+      "https://Worker.Example.com/": {
+        clientToken: "client-token",
+        hostToken: "host-token",
+      },
+    }),
+  })
+
+  expect(parsed.tokenMap).toEqual({
+    "https://worker.example.com": {
+      clientToken: "client-token",
+      hostToken: "host-token",
+    },
+  })
+  expect(parsed.issues).toHaveLength(0)
+})
+
+test("static env validation rejects invalid token map entries", () => {
+  const parsed = envModule.parseStaticWorkersEnv({
+    STATIC_WORKER_URLS: "https://worker.example.com",
+    STATIC_WORKER_TOKEN_MAP_JSON: JSON.stringify({
+      "https://other.example.com": { clientToken: "client-token", hostToken: "host-token" },
+      "not-a-url": { clientToken: "", hostToken: "host-token" },
+    }),
+  })
+
+  expect(parsed.issues.some((issue) => issue.message.includes("must also appear in STATIC_WORKER_URLS"))).toBe(true)
+  expect(parsed.issues.some((issue) => issue.message.includes("invalid worker URL key"))).toBe(true)
 })
 
 test("static provisioner in-process reservations prevent concurrent duplicate assignment", async () => {
