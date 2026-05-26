@@ -26,6 +26,7 @@ import { registerUpdaterIpc } from "./updater.mjs";
 import { exportWorkspaceConfig, importWorkspaceConfig } from "./workspace-archive.mjs";
 import { parseOpencodeConfig } from "./opencode-config-json.mjs";
 import {
+  preferredOpenworkDiscoveryToken,
   openworkWorkspaceDisplayName,
   selectOpenworkWorkspaceForConnection,
 } from "./remote-workspace.mjs";
@@ -2351,7 +2352,7 @@ async function handleDesktopInvoke(event, command, ...args) {
       if (remoteType === "openwork" && !resolvedOpenworkWorkspaceId) {
         const discovered = await discoverOpenworkWorkspace({
           hostUrl: openworkHostUrl ?? baseUrl,
-          token: input.openworkToken,
+          token: preferredOpenworkDiscoveryToken(input),
           hostToken: input.openworkHostToken,
           directory,
         });
@@ -2429,7 +2430,7 @@ async function handleDesktopInvoke(event, command, ...args) {
           if (!remoteWorkspaceId) {
             const discovered = await discoverOpenworkWorkspace({
               hostUrl: hostUrl ?? nextBaseUrl,
-              token: nextWorkspace.openworkToken,
+              token: preferredOpenworkDiscoveryToken(nextWorkspace),
               hostToken: nextWorkspace.openworkHostToken,
               directory,
             });

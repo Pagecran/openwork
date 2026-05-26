@@ -490,6 +490,58 @@ async function resolveConnectUrlFromCandidates(workerId: WorkerId, instanceUrl: 
   return null
 }
 
+export async function verifyStaticWorkerRuntimeConnectable(input: {
+  url: string
+  clientToken: string
+  hostToken: string
+  timeoutMs?: number
+}) {
+  const baseUrl = normalizeUrl(input.url)
+  const timeoutMs = input.timeoutMs ?? env.staticWorkers.healthcheckTimeoutMs
+  if (!baseUrl) {
+    throw new Error("Static worker URL is invalid")
+  }
+
+  const workspacesResponse = await fetch(`${baseUrl}/workspaces`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${input.clientToken}`,
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!workspacesResponse.ok) {
+    throw new Error(
+      `Static worker ${baseUrl} rejected the configured client token with HTTP ${workspacesResponse.status}`,
+    )
+  }
+
+  const payload = (await workspacesResponse.json()) as unknown
+  const connect = parseWorkspaceSelection({
+    ...(isRecord(payload) ? payload : {}),
+    baseUrl,
+  })
+  if (!connect?.workspaceId) {
+    throw new Error(`Static worker ${baseUrl} returned no selectable workspace from /workspaces`)
+  }
+
+  const envKeysResponse = await fetch(`${baseUrl}/env/keys`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "X-OpenWork-Host-Token": input.hostToken,
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!envKeysResponse.ok) {
+    throw new Error(
+      `Static worker ${baseUrl} rejected the configured host token with HTTP ${envKeysResponse.status}`,
+    )
+  }
+
+  return connect
+}
+
 async function getWorkerRuntimeAccess(workerId: WorkerId) {
   const instance = await getLatestWorkerInstance(workerId)
   const tokenRows = await db
@@ -714,11 +766,34 @@ async function continueStaticCloudProvisioning(input: {
   activityToken: string
 }) {
   const reservation = await reserveStaticWorkerInstance({ workerId: input.workerId })
+  const configuredTokens = env.staticWorkers.tokenMap?.[reservation.url] ?? null
 
   try {
     await checkStaticWorkerHealth(reservation.url, env.staticWorkers)
 
+    if (!configuredTokens) {
+      throw new Error(
+        `Static worker ${reservation.url} is missing STATIC_WORKER_TOKEN_MAP_JSON credentials`,
+      )
+    }
+
+    await verifyStaticWorkerRuntimeConnectable({
+      url: reservation.url,
+      clientToken: configuredTokens.clientToken,
+      hostToken: configuredTokens.hostToken,
+    })
+
     await db.transaction(async (tx) => {
+      await tx
+        .update(WorkerTokenTable)
+        .set({ token: configuredTokens.hostToken })
+        .where(and(eq(WorkerTokenTable.worker_id, input.workerId), eq(WorkerTokenTable.scope, "host")))
+
+      await tx
+        .update(WorkerTokenTable)
+        .set({ token: configuredTokens.clientToken })
+        .where(and(eq(WorkerTokenTable.worker_id, input.workerId), eq(WorkerTokenTable.scope, "client")))
+
       await tx
         .update(WorkerTable)
         .set({ status: "healthy" })

@@ -49,6 +49,7 @@ const EnvSchema = z.object({
   STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS: z.string().optional(),
   STATIC_WORKER_HEALTHCHECK_INTERVAL_MS: z.string().optional(),
   STATIC_WORKER_RESERVATION_TTL_MS: z.string().optional(),
+  STATIC_WORKER_TOKEN_MAP_JSON: z.string().optional(),
   STATIC_WORKER_ATTACH_ALLOW_PRIVATE: z.string().optional(),
   STATIC_WORKER_ATTACH_ALLOWED_HOSTS: z.string().optional(),
   STATIC_WORKER_ATTACH_ALLOWED_CIDRS: z.string().optional(),
@@ -187,6 +188,7 @@ type StaticWorkersEnvInput = {
   STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS?: string
   STATIC_WORKER_HEALTHCHECK_INTERVAL_MS?: string
   STATIC_WORKER_RESERVATION_TTL_MS?: string
+  STATIC_WORKER_TOKEN_MAP_JSON?: string
   STATIC_WORKER_ATTACH_ALLOW_PRIVATE?: string
   STATIC_WORKER_ATTACH_ALLOWED_HOSTS?: string
   STATIC_WORKER_ATTACH_ALLOWED_CIDRS?: string
@@ -291,6 +293,71 @@ export function parseStaticWorkersEnv(input: StaticWorkersEnvInput) {
     })
   }
 
+  const tokenMap: Record<string, { clientToken: string; hostToken: string }> = {}
+  const rawTokenMap = input.STATIC_WORKER_TOKEN_MAP_JSON?.trim()
+  if (rawTokenMap) {
+    let parsedTokenMap: unknown
+    try {
+      parsedTokenMap = JSON.parse(rawTokenMap)
+    } catch {
+      issues.push({
+        path: "STATIC_WORKER_TOKEN_MAP_JSON",
+        message: "STATIC_WORKER_TOKEN_MAP_JSON must be valid JSON",
+      })
+      parsedTokenMap = null
+    }
+
+    if (parsedTokenMap && (typeof parsedTokenMap !== "object" || Array.isArray(parsedTokenMap))) {
+      issues.push({
+        path: "STATIC_WORKER_TOKEN_MAP_JSON",
+        message: "STATIC_WORKER_TOKEN_MAP_JSON must be a JSON object keyed by worker URL",
+      })
+    }
+
+    if (parsedTokenMap && typeof parsedTokenMap === "object" && !Array.isArray(parsedTokenMap)) {
+      for (const [rawUrl, rawEntry] of Object.entries(parsedTokenMap)) {
+        let normalizedUrl: string
+        try {
+          normalizedUrl = normalizeStaticWorkerUrl(rawUrl)
+        } catch {
+          issues.push({
+            path: "STATIC_WORKER_TOKEN_MAP_JSON",
+            message: `STATIC_WORKER_TOKEN_MAP_JSON contains an invalid worker URL key ${rawUrl}`,
+          })
+          continue
+        }
+
+        if (!urls.includes(normalizedUrl)) {
+          issues.push({
+            path: "STATIC_WORKER_TOKEN_MAP_JSON",
+            message: `STATIC_WORKER_TOKEN_MAP_JSON entry ${normalizedUrl} must also appear in STATIC_WORKER_URLS`,
+          })
+          continue
+        }
+
+        if (typeof rawEntry !== "object" || rawEntry === null || Array.isArray(rawEntry)) {
+          issues.push({
+            path: "STATIC_WORKER_TOKEN_MAP_JSON",
+            message: `STATIC_WORKER_TOKEN_MAP_JSON entry ${normalizedUrl} must contain clientToken and hostToken strings`,
+          })
+          continue
+        }
+
+        const clientToken = typeof rawEntry.clientToken === "string" ? rawEntry.clientToken.trim() : ""
+        const hostToken = typeof rawEntry.hostToken === "string" ? rawEntry.hostToken.trim() : ""
+        if (!clientToken || !hostToken) {
+          issues.push({
+            path: "STATIC_WORKER_TOKEN_MAP_JSON",
+            message: `STATIC_WORKER_TOKEN_MAP_JSON entry ${normalizedUrl} must contain non-empty clientToken and hostToken strings`,
+          })
+          continue
+        }
+
+        tokenMap[normalizedUrl] = { clientToken, hostToken }
+      }
+    }
+  }
+
   const allowPrivateAttach = (input.STATIC_WORKER_ATTACH_ALLOW_PRIVATE ?? "false").trim().toLowerCase() === "true"
   const attachAllowedHosts = splitCsv(input.STATIC_WORKER_ATTACH_ALLOWED_HOSTS).map((host) => host.toLowerCase())
   const attachAllowedCidrs = splitCsv(input.STATIC_WORKER_ATTACH_ALLOWED_CIDRS)
@@ -301,6 +368,7 @@ export function parseStaticWorkersEnv(input: StaticWorkersEnvInput) {
     healthcheckTimeoutMs: healthcheckTimeoutMs ?? 10000,
     healthcheckIntervalMs: healthcheckIntervalMs ?? 1000,
     reservationTtlMs: reservationTtlMs ?? 300000,
+    tokenMap,
     allowPrivateAttach,
     attachAllowedHosts,
     attachAllowedCidrs,
@@ -388,6 +456,7 @@ export const env = {
     healthcheckTimeoutMs: staticWorkers.healthcheckTimeoutMs,
     healthcheckIntervalMs: staticWorkers.healthcheckIntervalMs,
     reservationTtlMs: staticWorkers.reservationTtlMs,
+    tokenMap: staticWorkers.tokenMap,
     allowPrivateAttach: staticWorkers.allowPrivateAttach,
     attachAllowedHosts: staticWorkers.attachAllowedHosts,
     attachAllowedCidrs: staticWorkers.attachAllowedCidrs,

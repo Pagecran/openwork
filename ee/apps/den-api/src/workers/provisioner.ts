@@ -34,6 +34,7 @@ export type StaticWorkerConfig = {
   healthcheckIntervalMs: number
   reservationTtlMs?: number
   unavailableUrls?: string[]
+  tokenMap?: Record<string, { clientToken: string; hostToken: string }>
 }
 
 type StaticWorkerReservation = {
