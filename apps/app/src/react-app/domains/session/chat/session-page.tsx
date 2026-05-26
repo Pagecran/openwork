@@ -831,8 +831,22 @@ export function SessionPage(props: SessionPageProps) {
                       </div>
                     </div>
                   ) : props.selectedSessionId ? (
-                    <div className="px-6 py-16 text-center text-sm text-dls-secondary">
-                      {t("session.loading_detail")}
+                    <div className="px-6 py-16 text-center">
+                      <div className="mx-auto max-w-md rounded-2xl border border-dls-border bg-dls-card px-5 py-6 shadow-[var(--dls-card-shadow)]">
+                        <h3 className="text-base font-medium text-dls-text">This task is ready</h3>
+                        <p className="mt-2 text-sm leading-6 text-dls-secondary">
+                          No messages are available for this task yet. Start a new task or choose another task from the sidebar.
+                        </p>
+                        <div className="mt-4 flex justify-center">
+                          <Button
+                            size="sm"
+                            onClick={() => props.sidebar.onCreateTaskInWorkspace(props.selectedWorkspaceId)}
+                            disabled={props.sidebar.newTaskDisabled}
+                          >
+                            New task
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-1 items-center justify-center px-6 py-16">

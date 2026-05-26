@@ -105,6 +105,37 @@ export function writeLastSessionFor(workspaceId: string, sessionId: string | nul
   safeSet(SESSION_BY_WORKSPACE_KEY, Object.keys(map).length ? JSON.stringify(map) : null);
 }
 
+export function normalizeRememberedWorkspaceSessions(workspaceAliases: Record<string, string>): void {
+  const aliasEntries = Object.entries(workspaceAliases).filter(([from, to]) => from.trim() && to.trim() && from !== to);
+  if (aliasEntries.length === 0) return;
+  const map = readSessionByWorkspaceMap();
+  let changed = false;
+  for (const [from, to] of aliasEntries) {
+    const value = map[from]?.trim() ?? "";
+    if (!value) continue;
+    if (!map[to]) map[to] = value;
+    delete map[from];
+    changed = true;
+  }
+  if (changed) {
+    safeSet(SESSION_BY_WORKSPACE_KEY, Object.keys(map).length ? JSON.stringify(map) : null);
+  }
+  const active = readActiveWorkspaceId();
+  const normalizedActive = active ? workspaceAliases[active] : null;
+  if (normalizedActive && normalizedActive !== active) {
+    writeActiveWorkspaceId(normalizedActive);
+  }
+  const order = readWorkspaceOrderIds();
+  if (order.length > 0) {
+    const normalized = order
+      .map((id) => workspaceAliases[id] ?? id)
+      .filter((id, index, all) => id.trim() && all.indexOf(id) === index);
+    if (normalized.length !== order.length || normalized.some((id, index) => id !== order[index])) {
+      writeWorkspaceOrderIds(normalized);
+    }
+  }
+}
+
 export function forgetWorkspaceMemory(workspaceId: string): void {
   const wsId = workspaceId?.trim();
   if (!wsId) return;

@@ -211,7 +211,7 @@ export function CloudWorkersView({
             <Input
               value={staticWorkerForm.url}
               onChange={(event) => setStaticWorkerForm((current) => ({ ...current, url: event.currentTarget.value }))}
-              placeholder="http://192.168.1.50:8787"
+              placeholder="http://worker-host.example:8787"
             />
             <Input
               value={staticWorkerForm.clientToken}
