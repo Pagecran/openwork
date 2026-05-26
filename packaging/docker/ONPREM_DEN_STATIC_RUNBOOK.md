@@ -2,6 +2,8 @@
 
 This runbook describes an operator-supported LAN/on-prem deployment where Den is the control plane and one or more pre-running OpenWork Host containers are the worker runtimes. Den does not create worker containers in `static` mode; it assigns each shared/cloud worker request to a healthy URL from `DEN_STATIC_WORKER_URLS`.
 
+When the first organization is created in static mode, Den automatically creates one default shared/static worker for that organization if static worker URLs are configured. The worker uses the same static provisioning path as normal shared worker creation: Den checks health, verifies the configured runtime tokens, persists the verified token values, and marks the worker `healthy` only after the runtime connect contract succeeds. If a URL exists but the token map or runtime verification is wrong, the worker remains visible as `failed` instead of leaving the organization with an unexplained empty worker list. Existing-worker organizations and non-static modes are unchanged.
+
 Semaphore is used below only as an example managed deployment tool. Equivalent MDM, configuration management, or release automation systems can apply the same inputs.
 
 ## Components and ports

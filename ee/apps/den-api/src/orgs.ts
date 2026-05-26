@@ -18,6 +18,7 @@ import { runPostOrganizationMemberChangeHooks } from "./organization-member-hook
 import { DEFAULT_ORGANIZATION_LIMITS, normalizeOrganizationMetadata, serializeOrganizationMetadata } from "./organization-limits.js"
 import { denDefaultDynamicOrganizationRoles, denOrganizationStaticRoles } from "./organization-access.js"
 import { ensureDefaultDesktopPolicyForOrganization } from "./desktop-policies.js"
+import { ensureFirstStaticWorkerForOrganization } from "./workers/first-static-worker.js"
 
 type UserId = typeof AuthUserTable.$inferSelect.id
 type SessionId = typeof AuthSessionTable.$inferSelect.id
@@ -695,10 +696,35 @@ export async function createOrganizationForUser(input: {
   userId: UserId
   name: string
 }) {
-  return createOrganizationRecord({
+  return createOrganizationForUserWithDeps(input)
+}
+
+export async function createOrganizationForUserWithDeps(input: {
+  userId: UserId
+  name: string
+}, deps: {
+  createOrganizationRecord?: typeof createOrganizationRecord
+  ensureFirstStaticWorker?: typeof ensureFirstStaticWorkerForOrganization
+} = {}) {
+  const createOrg = deps.createOrganizationRecord ?? createOrganizationRecord
+  const ensureFirstStaticWorker = deps.ensureFirstStaticWorker ?? ensureFirstStaticWorkerForOrganization
+  const organizationId = await createOrg({
     userId: input.userId,
     name: input.name.trim(),
   })
+
+  try {
+    await ensureFirstStaticWorker({
+      organizationId,
+      userId: input.userId,
+      name: "Default static worker",
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "first_static_worker_auto_create_failed"
+    console.error(`[workers] first static worker auto-create failed for organization ${organizationId}: ${message}`)
+  }
+
+  return organizationId
 }
 
 export async function updateOrganizationName(input: {
