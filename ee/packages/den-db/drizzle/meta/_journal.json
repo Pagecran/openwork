@@ -134,6 +134,13 @@
       "when": 1777486400000,
       "tag": "0019_llm_provider_opencode_oauth",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1779754557313,
+      "tag": "0020_scim_sso_identity",
+      "breakpoints": true
     }
   ]
 }

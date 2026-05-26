@@ -33,7 +33,6 @@ import {
   sanitizeOpenworkTemplateConfig,
 } from "./blueprint-sessions.js";
 import { inheritWorkspaceOpencodeConnection, resolveWorkspaceOpencodeConnection } from "./opencode-connection.js";
-import { fetchSharedBundle, publishSharedBundle } from "./share-bundles.js";
 import { seedOpencodeSessionMessages } from "./opencode-db.js";
 import { listPortableFiles } from "./portable-files.js";
 import {
@@ -67,6 +66,168 @@ const FILE_SESSION_MAX_BATCH_ITEMS = 64;
 const FILE_SESSION_MAX_FILE_BYTES = 5_000_000;
 const FILE_SESSION_CATALOG_DEFAULT_LIMIT = 2000;
 const FILE_SESSION_CATALOG_MAX_LIMIT = 10000;
+const OPENWORK_VOICE_REALTIME_MODEL = "gpt-realtime-2";
+const OPENWORK_VOICE_TRANSCRIPTION_MODEL = "gpt-4o-transcribe";
+
+const OPENWORK_VOICE_REALTIME_TOOLS = [
+  {
+    type: "function",
+    name: "openwork_snapshot",
+    description: "Read the current OpenWork UI control snapshot: route, status, narration, and visible action metadata.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: "openwork_list_actions",
+    description: "List semantic OpenWork UI actions. Call this before openwork_execute_action when you do not know the exact action id.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    type: "function",
+    name: "openwork_execute_action",
+    description: "Execute a semantic OpenWork UI action by id. Prefer this over screen coordinates or DOM guessing.",
+    parameters: {
+      type: "object",
+      properties: {
+        actionId: { type: "string", description: "The action id from openwork_list_actions, such as composer.set_text or composer.send." },
+        args: { type: "object", description: "Optional JSON arguments for the action.", additionalProperties: true },
+      },
+      required: ["actionId"],
+      additionalProperties: false,
+    },
+  },
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readStringField(value: unknown, key: string): string {
+  if (!isRecord(value)) return "";
+  const field = value[key];
+  return typeof field === "string" ? field.trim() : "";
+}
+
+async function resolveOpenAiRealtimeApiKey(env: EnvService): Promise<string> {
+  const records = await env.list();
+  const storedKey =
+    records.find((entry) => entry.key === "OPENAI_REALTIME_API_KEY")?.value.trim() ||
+    records.find((entry) => entry.key === "OPENAI_API_KEY")?.value.trim() ||
+    "";
+  if (storedKey) return storedKey;
+
+  return process.env.OPENWORK_OPENAI_REALTIME_API_KEY?.trim() ||
+    process.env.OPENAI_REALTIME_API_KEY?.trim() ||
+    process.env.OPENAI_API_KEY?.trim() ||
+    "";
+}
+
+function openworkVoiceRealtimeInstructions() {
+  return `# Role and Objective
+
+You are OpenWork Voice Mode, a voice-first control layer inside OpenWork.
+Help the user control OpenWork by using the semantic OpenWork UI tools.
+
+# Tool Policy
+
+- Prefer openwork_snapshot, openwork_list_actions, and openwork_execute_action over visual guessing.
+- If the user asks to write or draft something, use composer.set_text.
+- If the user asks to send or run the current prompt, use composer.send.
+- For navigation, settings, session, transcript, and composer work, inspect the action list first if the action id is unknown.
+- Do not claim an action completed until the tool succeeds.
+- Ask for confirmation before destructive actions such as deleting a session.
+
+# Voice Style
+
+- Be concise, calm, and direct.
+- If audio is unclear, ask the user to repeat it instead of guessing.
+- Ignore background speech that is not addressed to OpenWork.
+- Summarize tool results briefly and offer the next useful step.`;
+}
+
+function readOpenAiClientSecret(payload: unknown): { clientSecret: string; expiresAt: number | null } {
+  if (!isRecord(payload)) return { clientSecret: "", expiresAt: null };
+  const clientSecret = payload.client_secret;
+  if (typeof clientSecret === "string") return { clientSecret, expiresAt: null };
+  if (isRecord(clientSecret)) {
+    const value = typeof clientSecret.value === "string" ? clientSecret.value : "";
+    const expiresAt = typeof clientSecret.expires_at === "number" ? clientSecret.expires_at : null;
+    return { clientSecret: value, expiresAt };
+  }
+  const value = typeof payload.value === "string" ? payload.value : "";
+  return { clientSecret: value, expiresAt: null };
+}
+
+async function createOpenAiRealtimeVoiceSession(env: EnvService, input: unknown) {
+  const apiKey = await resolveOpenAiRealtimeApiKey(env);
+  if (!apiKey) {
+    throw new ApiError(
+      400,
+      "openai_api_key_missing",
+      "OpenAI API key missing. Save OPENAI_API_KEY in OpenWork Environment Variables or configure the Voice Mode extension.",
+    );
+  }
+
+  const model = readStringField(input, "model") || OPENWORK_VOICE_REALTIME_MODEL;
+  const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      session: {
+        type: "realtime",
+        model,
+        output_modalities: ["audio"],
+        audio: {
+          input: {
+            transcription: { model: OPENWORK_VOICE_TRANSCRIPTION_MODEL, language: "en" },
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.58,
+              silence_duration_ms: 320,
+              prefix_padding_ms: 300,
+              create_response: true,
+              interrupt_response: true,
+            },
+          },
+        },
+        instructions: openworkVoiceRealtimeInstructions(),
+        tool_choice: "auto",
+        tools: OPENWORK_VOICE_REALTIME_TOOLS,
+      },
+    }),
+  });
+
+  const text = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const errorPayload = isRecord(payload) && isRecord(payload.error) ? payload.error : null;
+    const message = typeof errorPayload?.message === "string" ? errorPayload.message : response.statusText;
+    throw new ApiError(response.status, "openai_realtime_failed", message || "Failed to create OpenAI Realtime session");
+  }
+
+  const { clientSecret, expiresAt } = readOpenAiClientSecret(payload);
+  if (!clientSecret) {
+    throw new ApiError(502, "openai_realtime_invalid_response", "OpenAI did not return a usable Realtime client secret");
+  }
+
+  return {
+    ok: true,
+    clientSecret,
+    expiresAt,
+    model,
+    transcriptionModel: OPENWORK_VOICE_TRANSCRIPTION_MODEL,
+    tools: OPENWORK_VOICE_REALTIME_TOOLS.map((tool) => tool.name),
+  };
+}
 
 const reloadBaselineRefreshers = new WeakMap<
   ServerConfig,
@@ -401,10 +562,10 @@ export async function startServer(config: ServerConfig): Promise<ServeResult> {
 
   return {
     ...server,
-    stop: () => {
+    stop: async () => {
       watcherHandle.close();
       reloadBaselineRefreshers.delete(config);
-      server.stop();
+      await server.stop();
     },
   };
 }
@@ -445,6 +606,18 @@ function buildOpencodeProxyUrl(baseUrl: string, path: string, search: string) {
   return target.toString();
 }
 
+function createOpencodeDirectoryFetch(directory: string): typeof fetch {
+  return Object.assign(
+    (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const headers = new Headers(init?.headers ?? request.headers);
+      headers.set("x-opencode-directory", directory);
+      return fetch(new Request(request, { headers }));
+    },
+    { preconnect: fetch.preconnect },
+  );
+}
+
 type OpencodeClientResult<T, E> =
   | { data: T | undefined; error: undefined; response: Response }
   | { data: undefined; error: E; response: Response };
@@ -452,10 +625,12 @@ type OpencodeClientResult<T, E> =
 function createWorkspaceOpencodeClient(config: ServerConfig, workspace: WorkspaceInfo) {
   const connection = resolveWorkspaceOpencodeConnection(config, workspace);
   const directory = resolveOpencodeDirectory(workspace);
+  const directoryFetch = directory ? createOpencodeDirectoryFetch(directory) : undefined;
 
   return createOpencodeClient({
     baseUrl: connection.baseUrl?.trim(),
     ...(directory ? { directory } : {}),
+    ...(directoryFetch ? { fetch: directoryFetch } : {}),
     ...(connection.authHeader ? { headers: { Authorization: connection.authHeader } } : {}),
   });
 }
@@ -1641,6 +1816,11 @@ function createRoutes(
     }
 
     return jsonResponse({ status: "applied", providerCount: applied.length, revision: payload.revision });
+  });
+
+  addRoute(routes, "POST", "/voice/realtime/session", "host", async (ctx) => {
+    const body = await readJsonBody(ctx.request);
+    return jsonResponse(await createOpenAiRealtimeVoiceSession(env, body));
   });
 
   addRoute(routes, "POST", "/workspaces/local", "host", async (ctx) => {
@@ -3289,34 +3469,6 @@ function createRoutes(
     return jsonResponse(result);
   });
 
-  addRoute(routes, "POST", "/share/bundles/publish", "client", async (ctx) => {
-    requireClientScope(ctx, "viewer");
-    const body = await readJsonBody(ctx.request);
-    if (typeof body.baseUrl === "string" && body.baseUrl.trim()) {
-      throw new ApiError(
-        400,
-        "publisher_base_url_forbidden",
-        "Bundle publishing always uses the configured OpenWork publisher. Remove baseUrl from the request.",
-      );
-    }
-    const result = await publishSharedBundle({
-      payload: body.payload,
-      bundleType: String(body.bundleType ?? "").trim(),
-      name: typeof body.name === "string" ? body.name : undefined,
-      timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
-    });
-    return jsonResponse(result);
-  });
-
-  addRoute(routes, "POST", "/share/bundles/fetch", "client", async (ctx) => {
-    requireClientScope(ctx, "viewer");
-    const body = await readJsonBody(ctx.request);
-    const bundle = await fetchSharedBundle(body.bundleUrl, {
-      timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
-    });
-  return jsonResponse(bundle);
-  });
-
   addRoute(routes, "GET", "/approvals", "host", async (ctx) => {
     return jsonResponse({ items: ctx.approvals.list() });
   });
@@ -3457,7 +3609,11 @@ async function readWorkspaceSessionSnapshot(
 }
 
 async function resolveWorkspace(config: ServerConfig, id: string): Promise<WorkspaceInfo> {
-  const workspace = config.workspaces.find((entry) => entry.id === id);
+  const workspaceId = id.trim();
+  const aliasWorkspaceId = workspaceId.startsWith("rem_") ? workspaceId.slice("rem_".length) : "";
+  const workspace =
+    config.workspaces.find((entry) => entry.id === workspaceId) ??
+    (aliasWorkspaceId ? config.workspaces.find((entry) => entry.id === aliasWorkspaceId) : undefined);
   if (!workspace) {
     throw new ApiError(404, "workspace_not_found", "Workspace not found");
   }

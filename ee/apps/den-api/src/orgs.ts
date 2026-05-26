@@ -716,6 +716,7 @@ export async function updateOrganizationSettings(input: {
   name?: string
   allowedEmailDomains?: readonly string[] | null
   allowedDesktopVersions?: readonly string[] | null
+  requireSso?: boolean
 }) {
   const nextName = typeof input.name === "string" ? input.name.trim() : null
   if (typeof input.name === "string" && !nextName) {
@@ -729,7 +730,7 @@ export async function updateOrganizationSettings(input: {
   if (input.allowedEmailDomains !== undefined) {
     updates.allowedEmailDomains = normalizeAllowedEmailDomains(input.allowedEmailDomains).domains
   }
-  if (input.allowedDesktopVersions !== undefined) {
+  if (input.allowedDesktopVersions !== undefined || input.requireSso !== undefined) {
     const rows = await db
       .select({ metadata: OrganizationTable.metadata })
       .from(OrganizationTable)
@@ -745,10 +746,16 @@ export async function updateOrganizationSettings(input: {
       ...normalizeOrganizationMetadata(existingOrganization.metadata).metadata,
     } as Record<string, unknown>
 
-    if (input.allowedDesktopVersions === null) {
-      delete nextMetadata.allowedDesktopVersions
-    } else {
-      nextMetadata.allowedDesktopVersions = input.allowedDesktopVersions
+    if (input.allowedDesktopVersions !== undefined) {
+      if (input.allowedDesktopVersions === null) {
+        delete nextMetadata.allowedDesktopVersions
+      } else {
+        nextMetadata.allowedDesktopVersions = input.allowedDesktopVersions
+      }
+    }
+
+    if (input.requireSso !== undefined) {
+      nextMetadata.requireSso = input.requireSso
     }
 
     updates.metadata = normalizeOrganizationMetadata(nextMetadata).metadata
@@ -1086,17 +1093,10 @@ export async function removeOrganizationMember(input: {
     return null
   }
 
-  const teams = await db
-    .select({ id: TeamTable.id })
-    .from(TeamTable)
-    .where(eq(TeamTable.organizationId, input.organizationId))
-
   await db.transaction(async (tx) => {
-    for (const team of teams) {
-      await tx
-        .delete(TeamMemberTable)
-        .where(and(eq(TeamMemberTable.teamId, team.id), eq(TeamMemberTable.orgMembershipId, member.id)))
-    }
+    await tx
+      .delete(TeamMemberTable)
+      .where(eq(TeamMemberTable.orgMembershipId, member.id))
 
     await tx
       .update(MemberTable)

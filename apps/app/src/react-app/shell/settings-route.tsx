@@ -39,6 +39,9 @@ import { AiSettingsView } from "../domains/settings/pages/ai-view";
 // Side-effect imports: register extension config components into the registry.
 import "../domains/settings/openai-image-gen-config";
 import "../domains/settings/ollama-config";
+import "../domains/settings/computer-use-config";
+import "../domains/settings/browser-extension-config";
+import "../domains/settings/openwork-voice-config";
 import { getExtensionConfigSlot, type ExtensionConfigContext } from "../domains/settings/extension-registry";
 import { PreferencesView } from "../domains/settings/pages/preferences-view";
 import { ShellCustomizationView } from "../domains/settings/pages/shell-view";
@@ -525,6 +528,10 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   const [imageGenerationBusy, setImageGenerationBusy] = useState(false);
   const [imageGenerationStatus, setImageGenerationStatus] = useState<string | null>(null);
   const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [userEnvKeys, setUserEnvKeys] = useState<string[]>([]);
   const emptyWorkspaceDisplay = useMemo<WorkspaceDisplay>(
     () => ({
       id: "",
@@ -939,6 +946,18 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
     };
   }, [openworkClient, runtimeWorkspaceId, selectedWorkspaceEndpoint]);
 
+  useEffect(() => {
+    if (!openworkClient) {
+      setUserEnvKeys([]);
+      return;
+    }
+    let cancelled = false;
+    void openworkClient.listUserEnvKeys()
+      .then((response) => { if (!cancelled) setUserEnvKeys(response.keys); })
+      .catch(() => { if (!cancelled) setUserEnvKeys([]); });
+    return () => { cancelled = true; };
+  }, [openworkClient]);
+
   const installOpenAiImageExtension = useCallback(async (apiKey: string) => {
     const workspaceClient = selectedWorkspaceEndpoint?.client ?? openworkClient;
     const workspaceId = runtimeWorkspaceId?.trim() ?? "";
@@ -982,6 +1001,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       // upsertUserEnv requires the host token; use openworkClient which carries it.
       if (openworkClient) {
         await openworkClient.upsertUserEnv([{ key: "OPENAI_API_KEY", value: resolvedApiKey }]);
+        setUserEnvKeys((current) => Array.from(new Set([...current, "OPENAI_API_KEY"])));
       }
       reloadCoordinator.markReloadRequired("plugins", { type: "plugin", name: "openwork-image-generation", action: "added" });
       setImageExtensionInstalled(true);
@@ -1026,6 +1046,44 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       setImageGenerationBusy(false);
     }
   }, [openworkClient, runtimeWorkspaceId, selectedWorkspaceEndpoint]);
+
+  const saveVoiceApiKey = useCallback(async (apiKey: string) => {
+    const resolvedApiKey = apiKey.trim();
+    if (!openworkClient || !resolvedApiKey) {
+      setVoiceError("OpenAI API key is required.");
+      return;
+    }
+    setVoiceBusy(true);
+    setVoiceStatus(null);
+    setVoiceError(null);
+    try {
+      await openworkClient.upsertUserEnv([{ key: "OPENAI_API_KEY", value: resolvedApiKey }]);
+      setUserEnvKeys((current) => Array.from(new Set([...current, "OPENAI_API_KEY"])));
+      setVoiceStatus("Saved OPENAI_API_KEY for Voice Mode.");
+    } catch (error) {
+      setVoiceError(describeRouteError(error));
+    } finally {
+      setVoiceBusy(false);
+    }
+  }, [openworkClient]);
+
+  const testVoiceSession = useCallback(async () => {
+    if (!openworkClient) {
+      setVoiceError("OpenWork server is not connected.");
+      return;
+    }
+    setVoiceBusy(true);
+    setVoiceStatus(null);
+    setVoiceError(null);
+    try {
+      const session = await openworkClient.createVoiceRealtimeSession();
+      setVoiceStatus(`Realtime ready with ${session.model} (${session.tools.length} OpenWork tools).`);
+    } catch (error) {
+      setVoiceError(describeRouteError(error));
+    } finally {
+      setVoiceBusy(false);
+    }
+  }, [openworkClient]);
 
   const installLocalProvider = useCallback(async (input: LocalProviderInstallInput) => {
     const client = selectedWorkspaceEndpoint?.client ?? openworkClient;
@@ -2032,6 +2090,12 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
                   void connectionsStore.connectMcp(entry);
                 }}
                 configSlotForEntry={(entry) => getExtensionConfigSlot(entry, {
+                  computerUse: {
+                    connected: connectionsSnapshot.mcpServers.some((server) => server.name === "computer-use"),
+                    connecting: connectionsSnapshot.mcpConnectingName === entry.name,
+                    onConnect: () => connectionsStore.connectMcp(entry),
+                    onRefresh: () => connectionsStore.refreshMcpServers(),
+                  },
                   imageExtension: {
                     busy: imageExtensionBusy || imageGenerationBusy,
                     status: imageExtensionStatus ?? imageGenerationStatus,
@@ -2039,6 +2103,18 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
                     envKeyDetected: providers.some((p) => p.id === "openai" && p.source === "env") || providerConnectedIds.includes("openai"),
                     onInstall: installOpenAiImageExtension,
                     onTestGenerate: generateOpenAiTestImage,
+                  },
+                  voiceExtension: {
+                    busy: voiceBusy,
+                    status: voiceStatus,
+                    error: voiceError,
+                    envKeyDetected:
+                      userEnvKeys.includes("OPENAI_REALTIME_API_KEY") ||
+                      userEnvKeys.includes("OPENAI_API_KEY") ||
+                      providers.some((p) => p.id === "openai" && p.source === "env") ||
+                      providerConnectedIds.includes("openai"),
+                    onSaveApiKey: saveVoiceApiKey,
+                    onTestSession: testVoiceSession,
                   },
                   localProvider: {
                     busy: localProviderBusy,
