@@ -352,6 +352,28 @@ test("static attach permission gate allows owners and admins only", () => {
   expect(workersSharedModule.canAttachStaticWorkerForMember({ currentMember: { isOwner: false, role: "member" } })).toBe(false)
 })
 
+test("worker create schema accepts generic signup auto-launch source", () => {
+  expect(workersSharedModule.createWorkerSchema.safeParse({
+    name: "Signup Worker",
+    destination: "cloud",
+    source: "signup_auto",
+  }).success).toBe(true)
+})
+
+test("signup-only idempotency guard does not apply to manual worker creation", () => {
+  expect(workersSharedModule.shouldUseSignupAutoExistingWorker({
+    destination: "cloud",
+    source: "signup_auto",
+  })).toBe(true)
+  expect(workersSharedModule.shouldUseSignupAutoExistingWorker({
+    destination: "cloud",
+    source: "manual",
+  })).toBe(false)
+  expect(workersSharedModule.shouldUseSignupAutoExistingWorker({
+    destination: "cloud",
+  })).toBe(false)
+})
+
 test("static attach route requires authentication", async () => {
   const app = new Hono()
   workersCoreModule.registerWorkerCoreRoutes(app)

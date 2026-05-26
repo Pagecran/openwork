@@ -32,6 +32,7 @@ import {
   getCheckoutUrl,
   getEmailDomain,
   getErrorMessage,
+  getOnboardingAutoLaunchDecision,
   getOrgLimitError,
   getRuntimeServiceLabel,
   getSocialCallbackUrl,
@@ -199,6 +200,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
   const [billingError, setBillingError] = useState<string | null>(null);
   const [billingLoadedOnce, setBillingLoadedOnce] = useState(false);
   const [orgLimitError, setOrgLimitError] = useState<OrgLimitError | null>(null);
+  const [activeOrganizationId, setActiveOrganizationId] = useState<string | null>(null);
 
   const [workerName, setWorkerName] = useState(DEFAULT_WORKER_NAME);
   const [worker, setWorker] = useState<WorkerLaunch | null>(null);
@@ -994,6 +996,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
 
     const { response, payload } = await requestJson("/v1/me/orgs", { method: "GET", headers }, 12000);
     if (!response.ok) {
+      setActiveOrganizationId(null);
       return {
         orgs: [],
         activeOrgId: null,
@@ -1001,7 +1004,9 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    return parseOrgListPayload(payload);
+    const orgDirectory = parseOrgListPayload(payload);
+    setActiveOrganizationId(orgDirectory.activeOrgId ?? orgDirectory.orgs[0]?.id ?? null);
+    return orgDirectory;
   }
 
   async function resolveDashboardRoute() {
@@ -1056,8 +1061,14 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     const autoName = deriveOnboardingWorkerName(authenticatedUser);
     setWorkerName(autoName);
     setLaunchError(null);
-    setLaunchStatus("Create a workspace to get started.");
-    persistOnboardingIntent(null);
+    setLaunchStatus("Creating your first worker...");
+    persistOnboardingIntent({
+      version: 1,
+      workerName: autoName,
+      shouldLaunch: true,
+      completed: false,
+      authMethod: _authMethod,
+    });
     return "dashboard" as const;
   }
 
@@ -1256,6 +1267,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     setBillingSummary(null);
     setBillingError(null);
     setOrgLimitError(null);
+    setActiveOrganizationId(null);
     setBillingBusy(false);
     setBillingCheckoutBusy(false);
     setBillingSubscriptionBusy(false);
@@ -1313,7 +1325,8 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
           headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
           body: JSON.stringify({
             name: resolvedLaunchName,
-            destination: "cloud"
+            destination: "cloud",
+            source: options.source
           })
         },
         12000
@@ -1760,6 +1773,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     }
 
     if (!summary.featureGateEnabled || summary.hasActivePlan) {
+      onboardingAutoLaunchKeyRef.current = null;
       return (await resolveUserLandingRoute()) ?? "/organization";
     }
 
@@ -1821,6 +1835,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) {
+      setActiveOrganizationId(null);
       setWorkers([]);
       setWorkersLoadedOnce(false);
       setWorkersError(null);
@@ -1828,6 +1843,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     }
 
     void refreshWorkers();
+    void loadOrgDirectory();
   }, [user?.id, authToken]);
 
   useEffect(() => {
@@ -2014,36 +2030,35 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
   }, [desktopAuthRequested, user?.id, authToken, desktopRedirectUrl, desktopRedirectBusy, desktopRedirectAttempted, desktopAuthScheme]);
 
   useEffect(() => {
-    if (!user || !onboardingPending) {
+    const decision = getOnboardingAutoLaunchDecision({
+      userId: user?.id ?? null,
+      activeOrganizationId,
+      onboardingIntent,
+      billingSummary,
+      workersLoadedOnce,
+      ownedWorkerCount,
+      launchBusy,
+      currentAutoLaunchKey: onboardingAutoLaunchKeyRef.current,
+    });
+
+    if (decision === "idle") {
       onboardingAutoLaunchKeyRef.current = null;
       return;
     }
 
-    if (!billingSummary) {
-      return;
-    }
-
-    if (billingSummary.featureGateEnabled && !billingSummary.hasActivePlan) {
-      return;
-    }
-
-    if (ownedWorkerCount > 0) {
+    if (decision === "complete_existing") {
       markOnboardingComplete();
       return;
     }
 
-    if (launchBusy) {
+    if (decision !== "launch" || !user || !onboardingIntent) {
       return;
     }
 
-    const autoLaunchKey = `${user.id}:${onboardingIntent?.workerName ?? DEFAULT_WORKER_NAME}`;
-    if (onboardingAutoLaunchKeyRef.current === autoLaunchKey) {
-      return;
-    }
-
+    const autoLaunchKey = `${activeOrganizationId}:${onboardingIntent.workerName || DEFAULT_WORKER_NAME}`;
     onboardingAutoLaunchKeyRef.current = autoLaunchKey;
-    markOnboardingComplete();
-  }, [billingSummary?.featureGateEnabled, billingSummary?.hasActivePlan, launchBusy, onboardingIntent?.workerName, onboardingPending, ownedWorkerCount, user?.id]);
+    void launchWorker({ source: "signup_auto", workerNameOverride: onboardingIntent.workerName });
+  }, [activeOrganizationId, billingSummary, launchBusy, onboardingIntent, onboardingPending, ownedWorkerCount, user?.id, workersLoadedOnce]);
 
   useEffect(() => {
     if (!user) {
