@@ -43,6 +43,11 @@ function workspaceRuntimeIdentity(workspace: OpenworkWorkspaceInfo, fallbackServ
   return serverUrl ? `${serverUrl}::${runtimeId}` : runtimeId;
 }
 
+function remoteRuntimeId(workspace: OpenworkWorkspaceInfo): string {
+  if (workspace.workspaceType !== "remote") return "";
+  return workspaceServerId(workspace).trim();
+}
+
 function mergeServerIntoRemoteWorkspace(
   serverWorkspace: OpenworkWorkspaceInfo,
   remoteWorkspace: RouteWorkspaceModel,
@@ -141,6 +146,12 @@ export function mergeRouteWorkspaces(
       return key ? [[key, workspace] as const] : [];
     }),
   );
+  const remoteDesktopByRuntimeId = new Map(
+    desktopWorkspaces.flatMap((workspace) => {
+      const runtimeId = remoteRuntimeId(workspace);
+      return runtimeId ? [[runtimeId, workspace] as const] : [];
+    }),
+  );
   const desktopById = new Map(desktopWorkspaces.map((workspace) => [workspace.id, workspace]));
   const desktopByPath = new Map(
     desktopWorkspaces.flatMap((workspace) => {
@@ -153,7 +164,10 @@ export function mergeRouteWorkspaces(
   const mergedServer: RouteWorkspaceModel[] = [];
 
   for (const workspace of serverWorkspaces) {
-    const remoteMatch = remoteDesktopByRuntime.get(workspaceRuntimeIdentity(workspace, serverBaseUrl));
+    const serverRuntimeId = workspaceServerId(workspace).trim();
+    const remoteMatch =
+      remoteDesktopByRuntime.get(workspaceRuntimeIdentity(workspace, serverBaseUrl)) ??
+      remoteDesktopByRuntimeId.get(serverRuntimeId);
     if (remoteMatch) {
       usedDesktopIds.add(remoteMatch.id);
       mergedServer.push(mergeServerIntoRemoteWorkspace(workspace, remoteMatch));
