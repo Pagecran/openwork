@@ -1,0 +1,13 @@
+# nomadworks_validate
+
+Result: FAIL
+
+Reason: pre-existing repository baseline validation failures unrelated to TASK-2026-05-26-015 remain present.
+
+Representative failures:
+- `D:\openwork\codemap.yml`: link path does not exist: `Agents_Common.md`
+- `D:\openwork\codemap.yml`: link path does not exist: `./docs/core/agent_orchestration.md`
+- `D:\openwork\codemap.yml`: link path does not exist: `./docs/architecture/TECHNICAL_ARCHITECTURE.md`
+- Missing CodeMap entries across many pre-existing source directories under `apps/`, `ee/`, `packages/`, `scripts/`, and evidence folders.
+
+Assessment: recorded for transparency only; not introduced by the rebuild/package/install execution in this task.

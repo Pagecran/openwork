@@ -1,0 +1,26 @@
+# Silent install
+installer=D:\openwork\apps\desktop\dist-electron\openwork-win-x64-0.13.12.exe
+exit_code=0
+
+# Installed executable metadata
+
+FullName      : C:\Users\Admin\AppData\Local\Programs\@openworkdesktop\OpenWork.exe
+Length        : 201246720
+CreationTime  : 26/05/2026 23:19:34
+LastWriteTime : 26/05/2026 23:19:10
+VersionInfo   : File:             C:\Users\Admin\AppData\Local\Programs\@openworkdesktop\OpenWork.exe
+                InternalName:     OpenWork
+                OriginalFilename: 
+                FileVersion:      0.13.12
+                FileDescription:  OpenWork desktop shell
+                Product:          OpenWork
+                ProductVersion:   0.13.12.0
+                Debug:            False
+                Patched:          False
+                PreRelease:       False
+                PrivateBuild:     False
+                SpecialBuild:     False
+                Language:         Anglais (États-Unis)
+                
+
+

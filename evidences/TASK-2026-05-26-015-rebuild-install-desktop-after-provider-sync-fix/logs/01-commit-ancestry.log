@@ -1,0 +1,30 @@
+# Git status and commit ancestry
+ M tasks/current.md
+?? .codenomad/
+?? .nomadworks/
+?? codemap.yml
+?? docs/scrs/
+?? evidences/TASK-2026-05-23-009-provider-credential-stack-restructure-e2e/
+?? evidences/TASK-2026-05-24-002-runbook-verbatim-deployment-test/
+?? evidences/TASK-2026-05-25-001-den-org-member-joined-at-status/
+?? evidences/TASK-2026-05-25-003-align-desktop-version-metadata/
+?? evidences/TASK-2026-05-25-004-desktop-shared-workspaces-empty/
+?? evidences/TASK-2026-05-25-005-make-test-static-worker-connectable/
+?? evidences/TASK-2026-05-25-006-clean-room-den-static-validation/
+?? evidences/TASK-2026-05-25-009-desktop-connect-ready-worker-fails/
+?? evidences/TASK-2026-05-26-001-den-static-e2e-recovery/
+?? evidences/TASK-2026-05-26-005-auto-create-first-static-worker/
+?? evidences/TASK-2026-05-26-007-restore-generic-signup-worker-launch/
+?? evidences/TASK-2026-05-26-010-fix-remote-workspace-dedupe-empty-session-state/
+?? evidences/TASK-2026-05-26-014-fix-managed-provider-sync-to-remote-worker/
+?? evidences/TASK-2026-05-26-015-rebuild-install-desktop-after-provider-sync-fix/
+?? tasks/todo/
+
+# HEAD
+01e846d027a18ee4cb2ed5db843d6bd10e2d41b0
+
+# Verify target commit exists
+01e846d027a18ee4cb2ed5db843d6bd10e2d41b0
+
+# Verify target commit is ancestor of HEAD
+ancestor=true

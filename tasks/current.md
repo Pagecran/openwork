@@ -7,6 +7,8 @@
 
 ## Active
 
+- TASK-2026-05-26-014 — Fix managed provider sync to remote worker
+- TASK-2026-05-26-013 — Investigate models unavailable after VM158 client install
 - TASK-2026-05-26-010 — Fix remote workspace dedupe and empty session state
 - TASK-2026-05-26-009 — Investigate VM158 remote workspace session/connect bug
 - TASK-2026-05-26-008 — Fresh VM validation after generic signup worker fix

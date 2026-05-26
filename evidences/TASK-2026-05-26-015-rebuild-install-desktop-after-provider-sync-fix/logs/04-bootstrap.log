@@ -1,0 +1,15 @@
+# Managed bootstrap verification
+path=C:\ProgramData\OpenWork\desktop-bootstrap.json
+baseUrl=http://192.168.1.51:3005
+apiBaseUrl=http://192.168.1.51:3005/api/den
+
+# Bootstrap file contents
+{
+  "apiBaseUrl": "http://192.168.1.51:3005/api/den",
+  "requireSignin": true,
+  "baseUrl": "http://192.168.1.51:3005"
+}
+
+
+# OpenWork process check
+openwork_processes=none
