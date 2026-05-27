@@ -1,0 +1,34 @@
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "git -c safe.directory=/srv/openwork -C /srv/openwork log --oneline -1"
+63196ada fix: TASK-2026-05-26-007 restore signup worker launch
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "grep -n 'buildManagedProviderModelRuntimeConfig\|model.config' /srv/openwork/apps/server/src/server.ts"
+3891:  const models = Object.fromEntries(provider.models.map((model) => [model.id, { ...model.config, id: model.id, name: model.name }]));
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "sudo git -c safe.directory=/srv/openwork -C /srv/openwork fetch origin dev-0.13.13-integration && sudo git -c safe.directory=/srv/openwork -C /srv/openwork show --no-patch --oneline origin/dev-0.13.13-integration"
+From https://github.com/Pagecran/openwork
+ * branch              dev-0.13.13-integration -> FETCH_HEAD
+   63196ada..acf01192  dev-0.13.13-integration -> origin/dev-0.13.13-integration
+acf01192 fix: TASK-2026-05-26-017 sanitize managed provider model config
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "sudo git -c safe.directory=/srv/openwork -C /srv/openwork checkout origin/dev-0.13.13-integration -- apps/server/src/server.ts apps/server/src/managed-provider-sync.e2e.test.ts && grep -n 'buildManagedProviderModelRuntimeConfig\|experimental\|knowledge' /srv/openwork/apps/server/src/server.ts | sed -n '1,20p'"
+3891:  const models = Object.fromEntries(provider.models.map((model) => [model.id, buildManagedProviderModelRuntimeConfig(model)]));
+3905:function buildManagedProviderModelRuntimeConfig(model: ManagedProviderSyncProvider["models"][number]) {
+3914:  for (const key of ["attachment", "reasoning", "temperature", "tool_call", "interleaved", "experimental"] as const) {
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "sudo docker-compose --env-file /srv/openwork/deploy/worker-158.env -f /srv/openwork/packaging/docker/docker-compose.yml -p openwork-worker-158 up --build -d --force-recreate openwork-host"
+Result: rebuilt and recreated only `openwork-worker-158_openwork-host_1`.
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "docker top openwork-worker-158_openwork-host_1 -eo pid,args"
+PID                 COMMAND
+<sanitized>         sh -lc ... bun apps/orchestrator/src/cli.ts serve ... --allow-external --sidecar-source external --openwork-server-bin /repo/apps/server/bin/openwork-server.mjs --no-opencode-router
+<sanitized>         bun apps/orchestrator/src/cli.ts serve ... --allow-external --sidecar-source external --openwork-server-bin /repo/apps/server/bin/openwork-server.mjs --no-opencode-router
+<sanitized>         /data/sidecars/opencode/1.14.38/linux-x64/opencode serve --hostname 127.0.0.1 --port 4096 --cors <sanitized>
+<sanitized>         node /repo/apps/server/bin/openwork-server.mjs --host 0.0.0.0 --port 8787 --workspace /workspace ...
+<sanitized>         bun /repo/apps/server/src/cli.ts --host 0.0.0.0 --port 8787 --workspace /workspace ...
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'"
+openwork-worker-158_openwork-host_1      Up (healthy)   openwork-worker-158_openwork-host
+openwork-den-static-158_web_1            Up (healthy)   openwork-den-static-158_web
+openwork-den-static-158_den_1            Up (healthy)   openwork-den-static-158_den
+openwork-den-static-158_worker-proxy_1   Up (healthy)   openwork-den-static-158_worker-proxy
+openwork-den-static-158_mysql_1          Up (healthy)   mysql:8.4

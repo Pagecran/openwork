@@ -7,6 +7,7 @@
 
 ## Active
 
+- TASK-2026-05-26-017 — Fix Den to OpenCode model config translation
 - TASK-2026-05-26-014 — Fix managed provider sync to remote worker
 - TASK-2026-05-26-013 — Investigate models unavailable after VM158 client install
 - TASK-2026-05-26-010 — Fix remote workspace dedupe and empty session state

@@ -1,0 +1,38 @@
+$ GET http://192.168.1.51:8787/workspaces [worker client token redacted]
+STATUS=200
+WORKSPACES=1
+
+$ GET http://192.168.1.51:8787/workspace/ws_c52ddf65534b/sessions [worker client token redacted]
+STATUS=200
+COUNT=1
+
+$ GET http://192.168.1.51:8787/workspace/ws_c52ddf65534b/opencode/config/providers [worker client token redacted]
+STATUS=200
+providers:
+- OpenCode Zen (`opencode`) — 3 built-in models
+- nvidia (`lpr_01ksje8xpce4fbjntxz5zvhd6d`) — 4 managed models
+  - deepseek-ai/deepseek-v4-flash
+  - deepseek-ai/deepseek-v4-pro
+  - google/gemma-4-31b-it
+  - minimaxai/minimax-m2.7
+
+$ GET http://192.168.1.51:8787/opencode/app [worker client token redacted]
+STATUS=200
+BODY_LEN=2365
+
+$ sudo python3 parse /srv/openwork-worker-158/workspace/opencode.jsonc
+JSON_PARSE=ok
+PROVIDER_IDS=lpr_01ksje8xpce4fbjntxz5zvhd6d,openai
+lpr_01ksje8xpce4fbjntxz5zvhd6d.id=nvidia
+lpr_01ksje8xpce4fbjntxz5zvhd6d.model_count=4
+lpr_01ksje8xpce4fbjntxz5zvhd6d.bad_experimental=none
+openai.id=openai
+openai.model_count=2
+openai.bad_experimental=none
+HAS_OBJECT_EXPERIMENTAL=false
+
+$ sudo python3 parse /srv/openwork-worker-158/workspace/.opencode/openwork.json
+source=den
+applied=lpr_01ksje8xpce4fbjntxz5zvhd6d,lpr_01ksm9ex1xe00812sfrq4xr6fe
+revision_contains_nvidia=true
+revision_contains_openai=true

@@ -1,0 +1,18 @@
+$ curl http://192.168.1.51:8787/health
+{"ok":true,"version":"0.13.12","opencodeVersion":"1.14.38","uptimeMs":16266}
+
+$ POST http://192.168.1.51:3005/api/den/v1/workers/wrk_01ksje53bfe4fbjn2d3cefqf3y/managed-providers/sync [Authorization redacted]
+{"status":"applied","providerCount":2,"revision":"<sanitized-managed-provider-revision>"}
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "docker logs --tail 120 openwork-den-static-158_den_1 2>&1 | grep 'managed-providers/sync' | tail -2"
+<-- POST /v1/workers/wrk_01ksje53bfe4fbjn2d3cefqf3y/managed-providers/sync
+--> POST /v1/workers/wrk_01ksje53bfe4fbjn2d3cefqf3y/managed-providers/sync 200 625ms
+
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "docker logs --tail 120 openwork-worker-158_openwork-host_1 2>&1 | grep -E 'managed-providers/sync|ConfigInvalidError|/sessions|/opencode/app|opencode/config/providers'"
+[openwork-server] POST /managed-providers/sync 200 571ms
+[openwork-server] GET /workspace/ws_c52ddf65534b/sessions 200 25ms
+[openwork-server] GET /workspace/ws_c52ddf65534b/opencode/config/providers 200 193ms (opencode)
+[openwork-server] GET /opencode/app 200 26ms (opencode)
+[openwork-server] GET /workspace/ws_c52ddf65534b/opencode/config/providers 200 9ms (opencode)
+
+Checked pattern absence: no `ConfigInvalidError` appeared in the inspected Den/worker sync log window after the successful sync.
