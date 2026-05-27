@@ -1,0 +1,17 @@
+$ scp -i "C:/Users/Admin/.ssh/codenomad_vm" "D:/openwork/apps/server/src/server.ts" "D:/openwork/apps/server/src/managed-provider-sync.e2e.test.ts" codenomad@192.168.1.51:/tmp/
+$ ssh -i "C:/Users/Admin/.ssh/codenomad_vm" codenomad@192.168.1.51 "sudo install -m 0644 /tmp/server.ts /srv/openwork/apps/server/src/server.ts && sudo install -m 0644 /tmp/managed-provider-sync.e2e.test.ts /srv/openwork/apps/server/src/managed-provider-sync.e2e.test.ts && sudo docker-compose --env-file /srv/openwork/deploy/worker-158.env -f /srv/openwork/packaging/docker/docker-compose.yml -p openwork-worker-158 up --build -d --force-recreate openwork-host"
+Building openwork-host
+Sending build context to Docker daemon  61.13MB
+Step 1/12 : FROM oven/bun:1.2.20
+ ---> 90a139d39b64
+Step 2/12 : WORKDIR /repo
+ ---> Using cache
+Step 3/12 : RUN apt-get update ... && npm install -g pnpm@10.27.0 ...
+ ---> Using cache
+Step 4/12 : COPY . .
+ ---> 9a1e14408e2e
+Step 5/12 : RUN pnpm install --frozen-lockfile
+Done in 39s using pnpm v10.27.0
+Successfully built bc9714679185
+Successfully tagged openwork-worker-158_openwork-host:latest
+Recreating openwork-worker-158_openwork-host_1 ... done

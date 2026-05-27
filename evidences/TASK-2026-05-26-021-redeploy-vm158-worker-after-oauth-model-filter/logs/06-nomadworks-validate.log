@@ -1,0 +1,12 @@
+$ nomadworks_validate
+FAIL: Validation errors found:
+- D:\openwork\codemap.yml: link path does not exist: Agents_Common.md
+- D:\openwork\codemap.yml: link path does not exist: ./docs/core/agent_orchestration.md
+- D:\openwork\codemap.yml: link path does not exist: ./docs/architecture/TECHNICAL_ARCHITECTURE.md
+- Missing CodeMap: Directory 'apps' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'apps\\server' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'apps\\server\\src' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'ee' contains source but has no codemap.yml.
+- Missing CodeMap: Directory 'tasks\\todo' contains source but has no codemap.yml.
+
+Result classification: pre-existing repository-wide CodeMap/link validation failures unrelated to TASK-021 implementation and VM158 worker redeploy. Full validator output reported hundreds of additional missing-CodeMap entries across the repo.

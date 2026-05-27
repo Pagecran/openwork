@@ -1,0 +1,21 @@
+$ remote VM158 validation after live-shape correction
+CONTAINER_HEALTH=healthy
+{"ok":true,"version":"0.13.12","opencodeVersion":"1.14.38","uptimeMs":20551}
+mysql: [Warning] Using a password on the command line interface can be insecure.
+SYNC_STATUS=applied
+SYNC_PROVIDER_COUNT=2
+SYNC_REVISION_PRESENT=True
+WORKSPACE_ID=ws_c52ddf65534b
+PATH=/workspace/ws_c52ddf65534b/sessions STATUS=200 BODY_LEN=12
+PATH=/workspace/ws_c52ddf65534b/opencode/config/providers STATUS=200 BODY_LEN=8423
+PROVIDER lpr_01ksje8xpce4fbjntxz5zvhd6d MODEL_COUNT=4 MODELS=deepseek-ai/deepseek-v4-flash|deepseek-ai/deepseek-v4-pro|google/gemma-4-31b-it|minimaxai/minimax-m2.7
+PROVIDER openai MODEL_COUNT=2 MODELS=gpt-5.4|gpt-5.5
+PATH=/opencode/app STATUS=200 BODY_LEN=2365
+DEN_LOG_TAIL
+<-- POST /v1/workers/wrk_01ksje53bfe4fbjn2d3cefqf3y/managed-providers/sync
+--> POST /v1/workers/wrk_01ksje53bfe4fbjn2d3cefqf3y/managed-providers/sync 200 608ms
+WORKER_LOG_TAIL
+[openwork-server] POST /managed-providers/sync 200 582ms
+[openwork-server] GET /workspace/ws_c52ddf65534b/sessions 200 30ms
+[openwork-server] GET /workspace/ws_c52ddf65534b/opencode/config/providers 200 178ms (opencode)
+[openwork-server] GET /opencode/app 200 18ms (opencode)

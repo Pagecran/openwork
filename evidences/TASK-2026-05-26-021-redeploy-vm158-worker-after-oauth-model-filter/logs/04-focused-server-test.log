@@ -1,0 +1,17 @@
+$ pnpm --filter openwork-server test src/managed-provider-sync.e2e.test.ts
+
+> openwork-server@0.13.12 test D:\openwork\apps\server
+> bun test "src/managed-provider-sync.e2e.test.ts"
+
+bun test v1.3.13 (bf2e2cec)
+Reload watcher enabled (1)
+Reload watcher enabled (1)
+Reload watcher enabled (1)
+Reload watcher enabled (1)
+Reload watcher enabled (1)
+Reload watcher enabled (1)
+
+ 6 pass
+ 0 fail
+ 59 expect() calls
+Ran 6 tests across 1 file. [400.00ms]

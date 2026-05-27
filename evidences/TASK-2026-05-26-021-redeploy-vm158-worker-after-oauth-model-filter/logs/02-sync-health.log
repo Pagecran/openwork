@@ -1,0 +1,15 @@
+$ remote VM158 sync and health validation script
+CONTAINER_HEALTH=healthy
+HEALTH_STATUS=200
+HEALTH_OK=True
+HEALTH_VERSION=0.13.12
+HEALTH_OPENCODE_VERSION=1.14.38
+mysql: [Warning] Using a password on the command line interface can be insecure.
+SYNC_STATUS=applied
+SYNC_PROVIDER_COUNT=2
+SYNC_REVISION_PRESENT=True
+DEN_LOG_TAIL
+<-- POST /v1/workers/wrk_01ksje53bfe4fbjn2d3cefqf3y/managed-providers/sync
+--> POST /v1/workers/wrk_01ksje53bfe4fbjn2d3cefqf3y/managed-providers/sync [32m200[0m 555ms
+WORKER_LOG_TAIL
+[openwork-server] POST /managed-providers/sync 200 527ms

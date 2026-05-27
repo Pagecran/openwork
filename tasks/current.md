@@ -7,6 +7,8 @@
 
 ## Active
 
+- TASK-2026-05-26-020 — Fix selected model filtering for OAuth managed providers
+- TASK-2026-05-26-019 — Investigate managed provider selected model filtering
 - TASK-2026-05-26-017 — Fix Den to OpenCode model config translation
 - TASK-2026-05-26-014 — Fix managed provider sync to remote worker
 - TASK-2026-05-26-013 — Investigate models unavailable after VM158 client install

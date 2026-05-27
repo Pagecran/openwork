@@ -1,0 +1,4 @@
+$ pnpm --filter openwork-server typecheck
+
+> openwork-server@0.13.12 typecheck D:\openwork\apps\server
+> tsc -p tsconfig.json --noEmit
