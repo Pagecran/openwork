@@ -1,0 +1,29 @@
+$ git rev-parse HEAD
+ef909d12e0cd17cd97a4ec30b1931ac19ddddb86
+
+$ ssh vm158 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+openwork-den-static-158_web_1            openwork-den-static-158_web            Up (healthy)   3005->3005
+openwork-den-static-158_den_1            openwork-den-static-158_den            Up (healthy)   8788->8788
+openwork-den-static-158_worker-proxy_1   openwork-den-static-158_worker-proxy   Up (healthy)   8789->8789
+openwork-den-static-158_mysql_1          mysql:8.4                              Up (healthy)   3306->3306
+openwork-worker-158_openwork-host_1      openwork-worker-158_openwork-host      Up (healthy)   8787->8787
+
+$ ssh vm158 docker inspect openwork-worker-158_openwork-host_1 --format labels
+compose.project=openwork-worker-158
+compose.service=openwork-host
+compose.working_dir=/srv/openwork/packaging/docker
+compose.env_file=/srv/openwork/deploy/worker-158.env
+mount.workspace=/srv/openwork-worker-158/workspace -> /workspace
+mount.data=/srv/openwork-worker-158/data -> /data
+
+$ ssh vm158 sudo docker-compose --env-file /srv/openwork/deploy/worker-158.env -f /srv/openwork/packaging/docker/docker-compose.yml -p openwork-worker-158 up --build -d --force-recreate openwork-host
+Result: worker container rebuilt/recreated only.
+
+$ ssh vm158 docker exec openwork-worker-158_openwork-host_1 /bin/sh -c 'for f in /proc/[0-9]*/cmdline; do ...; done'
+Observed final worker server process uses:
+- `bun apps/orchestrator/src/cli.ts serve ... --allow-external --sidecar-source external --openwork-server-bin /repo/apps/server/bin/openwork-server.mjs --no-opencode-router`
+- `node /repo/apps/server/bin/openwork-server.mjs ...`
+- `bun /repo/apps/server/src/cli.ts ...`
+
+$ ssh vm158 docker ps --filter name=openwork-worker-158_openwork-host_1 --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+openwork-worker-158_openwork-host_1   Up (healthy)   openwork-worker-158_openwork-host

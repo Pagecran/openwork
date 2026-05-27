@@ -1,0 +1,13 @@
+$ curl http://192.168.1.51:8787/health
+{"ok":true,"version":"0.13.12","opencodeVersion":"1.14.38"}
+
+$ curl -X POST http://192.168.1.51:8787/managed-providers/sync [sanitized precheck]
+{"code":"not_found","message":"Not found"}
+STATUS=404
+
+$ curl http://192.168.1.51:8787/health [post-redeploy]
+{"ok":true,"version":"0.13.12","opencodeVersion":"1.14.38"}
+
+$ curl -X POST http://192.168.1.51:8787/managed-providers/sync [sanitized route check]
+{"status":"applied","providerCount":0,"revision":"sanitized-route-check-2"}
+STATUS=200

@@ -1,0 +1,23 @@
+$ ssh vm158 mysql->worker managed provider sync [sanitized]
+{"status":"applied","providerCount":1,"revision":"TASK016-1779864824"}
+STATUS=200
+
+$ curl http://192.168.1.51:8787/workspace/ws_c52ddf65534b/opencode/config/providers [sanitized excerpt]
+providers.default.lpr_01ksje8xpce4fbjntxz5zvhd6d=minimaxai/minimax-m2.7
+providers.lpr_01ksje8xpce4fbjntxz5zvhd6d.name=nvidia
+providers.lpr_01ksje8xpce4fbjntxz5zvhd6d.modelCount=4
+providers.lpr_01ksje8xpce4fbjntxz5zvhd6d.models=
+- deepseek-ai/deepseek-v4-flash
+- deepseek-ai/deepseek-v4-pro
+- google/gemma-4-31b-it
+- minimaxai/minimax-m2.7
+
+$ ssh vm158 cat /srv/openwork-worker-158/workspace/.opencode/openwork.json
+managedProviders.source=den
+managedProviders.revision=TASK016-1779864824
+managedProviders.applied[0]=lpr_01ksje8xpce4fbjntxz5zvhd6d
+
+$ ssh vm158 cat /srv/openwork-worker-158/workspace/opencode.jsonc [sanitized excerpt]
+provider.lpr_01ksje8xpce4fbjntxz5zvhd6d.id=nvidia
+provider.lpr_01ksje8xpce4fbjntxz5zvhd6d.env[0]=NVIDIA_API_KEY
+provider.lpr_01ksje8xpce4fbjntxz5zvhd6d.models.count=4
