@@ -3371,11 +3371,15 @@ export async function startGithubConnectorInstall(input: { context: PluginArchAc
   } catch (error) {
     wrapGithubConnectorError(error)
   }
+  const currentUserId = input.context.organizationContext.currentMember.userId
+  if (!currentUserId) {
+    throw new PluginArchRouteFailure(403, "member_not_joined", "Current organization member has not joined the organization.")
+  }
   const state = createGithubInstallStateToken({
     orgId: input.context.organizationContext.organization.id,
     returnPath,
     secret: env.betterAuthSecret,
-    userId: input.context.organizationContext.currentMember.userId,
+    userId: currentUserId,
   })
 
   return {
