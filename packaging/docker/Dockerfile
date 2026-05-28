@@ -1,4 +1,4 @@
-FROM oven/bun:1.2.20
+FROM node:22-bookworm-slim
 
 WORKDIR /repo
 
@@ -7,11 +7,11 @@ RUN apt-get update \
     ca-certificates \
     curl \
     git \
-    nodejs \
-    npm \
     tar \
     unzip \
-  && npm install -g pnpm@10.27.0 \
+  && npm install -g pnpm@11.4.0 \
+  && curl -fsSL https://bun.sh/install | bash \
+  && ln -s /root/.bun/bin/bun /usr/local/bin/bun \
   && rm -rf /var/lib/apt/lists/*
 
 COPY . .
@@ -41,5 +41,5 @@ VOLUME ["/workspace", "/data"]
 CMD [ \
   "sh", \
   "-lc", \
-  "TOKEN_FILE=/data/openwork-worker.env; if [ -f \"$TOKEN_FILE\" ]; then . \"$TOKEN_FILE\"; fi; if [ -z \"${OPENWORK_TOKEN:-}\" ]; then OPENWORK_TOKEN=owc_$(node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"); export OPENWORK_TOKEN; fi; if [ -z \"${OPENWORK_HOST_TOKEN:-}\" ]; then OPENWORK_HOST_TOKEN=owh_$(node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"); export OPENWORK_HOST_TOKEN; fi; umask 077; printf 'OPENWORK_TOKEN=%s\\nOPENWORK_HOST_TOKEN=%s\\n' \"$OPENWORK_TOKEN\" \"$OPENWORK_HOST_TOKEN\" > \"$TOKEN_FILE\"; echo \"OpenWork worker tokens are stored in $TOKEN_FILE\"; bun apps/orchestrator/src/cli.ts serve --workspace /workspace --remote-access --openwork-port ${OPENWORK_PORT:-8787} --opencode-host 127.0.0.1 --opencode-port 4096 --connect-host ${OPENWORK_CONNECT_HOST:-127.0.0.1} --cors ${OPENWORK_CORS_ORIGINS:-'*'} --approval ${OPENWORK_APPROVAL_MODE:-manual} --no-opencode-router" \
+  "TOKEN_FILE=/data/openwork-worker.env; if [ -f \"$TOKEN_FILE\" ]; then . \"$TOKEN_FILE\"; fi; if [ -z \"${OPENWORK_TOKEN:-}\" ]; then OPENWORK_TOKEN=owc_$(node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"); export OPENWORK_TOKEN; fi; if [ -z \"${OPENWORK_HOST_TOKEN:-}\" ]; then OPENWORK_HOST_TOKEN=owh_$(node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"); export OPENWORK_HOST_TOKEN; fi; umask 077; printf 'OPENWORK_TOKEN=%s\\nOPENWORK_HOST_TOKEN=%s\\n' \"$OPENWORK_TOKEN\" \"$OPENWORK_HOST_TOKEN\" > \"$TOKEN_FILE\"; echo \"OpenWork worker tokens are stored in $TOKEN_FILE\"; bun apps/orchestrator/src/cli.ts serve --workspace /workspace --remote-access --openwork-port ${OPENWORK_PORT:-8787} --opencode-host 127.0.0.1 --opencode-port 4096 --connect-host ${OPENWORK_CONNECT_HOST:-127.0.0.1} --cors ${OPENWORK_CORS_ORIGINS:-'*'} --approval ${OPENWORK_APPROVAL_MODE:-manual} --allow-external --sidecar-source external --openwork-server-bin apps/server/bin/openwork-server.mjs --no-opencode-router" \
 ]
