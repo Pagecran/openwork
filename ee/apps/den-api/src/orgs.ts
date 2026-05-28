@@ -73,14 +73,15 @@ export type OrganizationContext = {
   }
   currentMember: {
     id: MemberId
-    userId: UserId
+    userId: UserId | null
     role: string
     createdAt: Date
+    joinedAt?: Date | null
     isOwner: boolean
   }
   members: Array<{
     id: MemberId
-    userId: UserId
+    userId: UserId | null
     role: string
     createdAt: Date
     isOwner: boolean
