@@ -47,6 +47,10 @@ function readSingleHeader(value: string | null) {
 function isWebAppHost(hostname: string) {
   const normalized = hostname.trim().toLowerCase()
 
+  if (!normalized) {
+    return false
+  }
+
   if (
     normalized === "localhost"
     || normalized === "0.0.0.0"
@@ -75,9 +79,9 @@ function isWebAppHost(hostname: string) {
     }
   }
 
-  return normalized === "app.openworklabs.com"
-    || normalized === "app.openwork.software"
-    || normalized.startsWith("app.")
+  // Self-hosted Den should trust the public browser host that terminates the
+  // auth flow, not only app.openworklabs.com.
+  return true
 }
 
 function withDenProxyPath(origin: string) {
