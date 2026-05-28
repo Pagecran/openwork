@@ -603,6 +603,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
     () =>
       selectedWorkspace
         ? {
+            ...selectedWorkspace,
             id: selectedWorkspace.id,
             name: selectedWorkspace.name ?? selectedWorkspace.displayNameResolved,
             path: selectedWorkspace.path ?? "",
@@ -825,6 +826,20 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       Object.values(providerAuthSnapshot.importedCloudProviders ?? {}).some(isOpenWorkCloudProvider),
     [providerAuthSnapshot.cloudOrgProviders, providerAuthSnapshot.importedCloudProviders],
   );
+
+  const cloudManagedModelIdsByProvider = useMemo(() => {
+    const next = new Map<string, Set<string>>();
+    for (const imported of Object.values(providerAuthSnapshot.importedCloudProviders ?? {})) {
+      const providerId = imported.providerId?.trim();
+      if (!providerId) continue;
+      const modelIds = imported.modelIds
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (!modelIds.length) continue;
+      next.set(providerId, new Set(modelIds));
+    }
+    return next;
+  }, [providerAuthSnapshot.importedCloudProviders]);
   const showOpenWorkModelsSubscribe = !cloudSession.isSignedIn || !hasOpenWorkCloudProvider;
 
   const subscribeToOpenWorkModels = useCallback(() => {
@@ -907,7 +922,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   );
   const opencodeBaseUrl = selectedWorkspaceEndpoint?.opencodeBaseUrl ?? "";
   const runtimeWorkspaceId = selectedWorkspaceEndpoint?.workspaceId ?? selectedWorkspace?.id ?? null;
+  const workspaceOpenworkClient = selectedWorkspaceEndpoint?.client ?? openworkClient;
   routeStateRef.current.runtimeWorkspaceId = runtimeWorkspaceId;
+  routeStateRef.current.openworkServerClient = workspaceOpenworkClient;
+  routeStateRef.current.openworkServerStatus = workspaceOpenworkClient ? "connected" : "disconnected";
+  routeStateRef.current.openworkServerCapabilities = workspaceOpenworkClient ? ROUTE_OPENWORK_CAPABILITIES : null;
 
   const opencodeClient = useMemo(() => {
     if (!selectedWorkspaceEndpoint || !selectedWorkspaceEndpoint.token) return null;
@@ -1220,7 +1239,9 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
         for (const provider of getConnectedProviderItems(data)) {
           const modelIds = Object.keys(provider.models);
           const isNew = !seenIds.has(provider.id);
+          const cloudManagedModelIds = cloudManagedModelIdsByProvider.get(provider.id);
           for (const id of modelIds) {
+            if (cloudManagedModelIds && !cloudManagedModelIds.has(id)) continue;
             const model = provider.models[id];
             options.push({
               providerID: provider.id,
@@ -1234,7 +1255,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
               isFree: false,
               isConnected: true,
               isRecommended: isNew,
-              source: /^lpr_/i.test(provider.id) ? "cloud" as const : undefined,
+              source: cloudManagedModelIds || /^lpr_/i.test(provider.id) ? "cloud" as const : undefined,
             });
           }
         }
@@ -1250,7 +1271,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [modelPickerOpen, opencodeBaseUrl, opencodeClient, selectedWorkspaceRoot]);
+  }, [cloudManagedModelIdsByProvider, modelPickerOpen, opencodeBaseUrl, opencodeClient, selectedWorkspaceRoot]);
 
   useEffect(() => {
     local.setUi((previous) => ({ ...previous, view: "settings", tab: route.tab }));
@@ -1913,6 +1934,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   const handleCreateRemoteWorkspace = async (input: {
     openworkHostUrl?: string | null;
     openworkToken?: string | null;
+    openworkClientToken?: string | null;
+    openworkHostToken?: string | null;
+    openworkDenBaseUrl?: string | null;
+    openworkDenOrgId?: string | null;
+    openworkDenWorkerId?: string | null;
     directory?: string | null;
     displayName?: string | null;
   }) => {
@@ -1926,6 +1952,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
         baseUrl: baseUrlValue,
         openworkHostUrl: baseUrlValue,
         openworkToken: input.openworkToken?.trim() || null,
+        openworkClientToken: input.openworkClientToken?.trim() || null,
+        openworkHostToken: input.openworkHostToken?.trim() || null,
+        openworkDenBaseUrl: input.openworkDenBaseUrl?.trim() || null,
+        openworkDenOrgId: input.openworkDenOrgId?.trim() || null,
+        openworkDenWorkerId: input.openworkDenWorkerId?.trim() || null,
         displayName: input.displayName?.trim() || null,
         directory: input.directory?.trim() || null,
         remoteType,
@@ -2250,7 +2281,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       case "cloud-workers":
         return (
           <CloudWorkersView
-            connectRemoteWorkspace={async () => false}
+            connectRemoteWorkspace={handleCreateRemoteWorkspace}
             onOpenAccount={openCloudAccountSettings}
           />
         );

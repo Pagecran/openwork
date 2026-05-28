@@ -7,7 +7,7 @@
     "name": "OpenWork",
     "email": "support@openworklabs.com"
   },
-  "main": "electron/main.mjs",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "node ./scripts/electron-dev.mjs",
@@ -18,14 +18,17 @@
     "build:electron": "node ./scripts/electron-build.mjs",
     "package:electron": "pnpm run build:electron && pnpm exec electron-builder --config electron-builder.yml",
     "package:electron:dir": "pnpm run build:electron && pnpm exec electron-builder --config electron-builder.yml --dir",
-    "electron": "pnpm exec electron ./electron/main.mjs",
+    "electron": "pnpm exec electron ./electron/main.cjs",
     "check:electron": "node ./scripts/check-electron-bridge.mjs",
+    "check:packaged-startup": "node ./scripts/check-packaged-startup.mjs",
     "typecheck:electron": "pnpm --dir ../server exec tsc -p ../desktop/tsconfig.electron.json --noEmit",
     "prepare:sidecar": "node ./scripts/prepare-sidecar.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/sdk": "^1.14.38",
     "better-sqlite3": "^11.10.0",
+    "chrome-devtools-mcp": "0.17.0",
     "electron-updater": "^6.3.9",
     "jsonc-parser": "^3.2.1",
     "minimatch": "^10.0.1",
