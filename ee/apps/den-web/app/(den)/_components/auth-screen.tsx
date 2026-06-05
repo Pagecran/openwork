@@ -149,7 +149,7 @@ export function AuthScreen() {
           </div>
         </div>
 
-        <div className="order-2">
+        <div className="order-1 lg:order-2">
           {!sessionHydrated ? (
             <SessionStatusPanel mode="checking" />
           ) : hasResolvedSession ? (
