@@ -23,9 +23,11 @@ import type { AuthContextVariables } from "../../session.js"
 import {
   checkStaticWorkerHealth,
   deprovisionWorker,
+  getStaticWorkerTokenPairForUrl,
   normalizeStaticWorkerUrl,
   provisionWorker,
   selectStaticWorkerUrlFromPool,
+  verifyStaticWorkerRuntimeAccess,
 } from "../../workers/provisioner.js"
 import { customDomainForWorker } from "../../workers/vanity-domain.js"
 
@@ -673,6 +675,7 @@ async function reserveStaticWorkerInstance(input: {
       ...env.staticWorkers,
       unavailableUrls: rows.map((row) => row.url),
     }))
+    const tokens = getStaticWorkerTokenPairForUrl(url, env.staticWorkers)
     const instanceId = createDenTypeId("workerInstance")
 
     await tx.insert(WorkerInstanceTable).values({
@@ -684,7 +687,17 @@ async function reserveStaticWorkerInstance(input: {
       status: "provisioning",
     })
 
-    return { instanceId, url }
+    await tx
+      .update(WorkerTokenTable)
+      .set({ token: tokens.hostToken })
+      .where(and(eq(WorkerTokenTable.worker_id, input.workerId), eq(WorkerTokenTable.scope, "host")))
+
+    await tx
+      .update(WorkerTokenTable)
+      .set({ token: tokens.clientToken })
+      .where(and(eq(WorkerTokenTable.worker_id, input.workerId), eq(WorkerTokenTable.scope, "client")))
+
+    return { instanceId, url, tokens }
   })
 }
 
@@ -699,6 +712,7 @@ async function continueStaticCloudProvisioning(input: {
 
   try {
     await checkStaticWorkerHealth(reservation.url, env.staticWorkers)
+    await verifyStaticWorkerRuntimeAccess(reservation.url, reservation.tokens, env.staticWorkers)
 
     await db.transaction(async (tx) => {
       await tx

@@ -2456,6 +2456,7 @@ function createRoutes(
       } else {
         await writeFile(opencodeConfigFile, opencodeConfigBefore, "utf8");
       }
+      await rollbackManagedProviderAuth(config, workspace, applied);
       return jsonResponse({
         status: "failed",
         providerCount: applied.length,
@@ -5086,6 +5087,18 @@ async function applyManagedProviderAuth(config: ServerConfig, workspace: Workspa
     method: "PUT",
     body: parseManagedOpencodeAuth(provider),
   });
+}
+
+async function rollbackManagedProviderAuth(config: ServerConfig, workspace: WorkspaceInfo, providerIds: string[]) {
+  for (const providerId of providerIds.slice().reverse()) {
+    try {
+      await fetchOpencodeJson(config, workspace, `/auth/${encodeURIComponent(providerId)}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Best-effort cleanup only; OpenCode does not expose prior auth material for exact restoration.
+    }
+  }
 }
 
 function sanitizeManagedProviderApplyError(error: unknown) {

@@ -66,7 +66,7 @@ function providerPayload() {
   };
 }
 
-async function boot(options: { failAuth?: boolean; providerListShape?: "all" | "providers-array" | "providers-object"; connected?: string[] } = {}) {
+async function boot(options: { failAuth?: boolean; failAuthProvider?: string; providerListShape?: "all" | "providers-array" | "providers-object"; connected?: string[] } = {}) {
   const workspace = mkdtempSync(join(tmpdir(), "openwork-managed-provider-workspace-"));
   const stores = mkdtempSync(join(tmpdir(), "openwork-managed-provider-stores-"));
   dirs.push(workspace, stores);
@@ -78,8 +78,10 @@ async function boot(options: { failAuth?: boolean; providerListShape?: "all" | "
     async fetch(request) {
       const url = new URL(request.url);
       if (url.pathname.startsWith("/auth/")) {
-        authCalls.push({ method: request.method, path: url.pathname, body: await request.json() });
-        if (options.failAuth) return Response.json({ error: "bad plain-server-secret access-secret refresh-secret" }, { status: 500 });
+        const body = request.method === "DELETE" ? null : await request.json();
+        authCalls.push({ method: request.method, path: url.pathname, body });
+        if (request.method === "DELETE") return Response.json({ ok: true });
+        if (options.failAuth || url.pathname === `/auth/${options.failAuthProvider ?? ""}`) return Response.json({ error: "bad plain-server-secret access-secret refresh-secret" }, { status: 500 });
         return Response.json({ ok: true });
       }
       if (url.pathname === "/config/providers") {
@@ -321,5 +323,22 @@ describe("managed provider sync runtime route", () => {
     expect(body.reason).toBe("Managed provider sync failed");
     const configPath = join(workspace, "opencode.jsonc");
     expect(existsSync(configPath) ? readFileSync(configPath, "utf8") : "").not.toContain("lpr_den_nvidia");
+  });
+
+  test("rolls back already-applied managed provider auth when a later provider auth apply fails", async () => {
+    const { base, authCalls } = await boot({ failAuthProvider: "openai" });
+    const response = await fetch(`${base}/managed-providers/sync`, {
+      method: "POST",
+      headers: hostAuth(),
+      body: JSON.stringify(providerPayload()),
+    });
+
+    expect(response.status).toBe(502);
+    expect(authCalls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "PUT /auth/lpr_den_nvidia",
+      "PUT /auth/openai",
+      "DELETE /auth/lpr_den_nvidia",
+    ]);
+    expect(authCalls[2]?.body).toBeNull();
   });
 });

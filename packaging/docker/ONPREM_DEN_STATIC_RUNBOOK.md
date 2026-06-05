@@ -54,6 +54,7 @@ Prepare these values before launching anything:
 - `DEN_MYSQL_ROOT_PASSWORD`
 - `DEN_STATIC_WORKER_URLS`, containing all worker URLs as a comma-separated list
 - `DEN_STATIC_WORKER_TOKEN_MAP_JSON`, containing the token pair for each worker URL
+- `DEN_PROVISIONER_MODE=static`, so Den uses the fixed worker pool instead of a managed cloud provisioner
 
 The browser-facing Den web URL must match the value used for `DEN_BETTER_AUTH_URL`. If users open Den at `https://den.company.local`, then `DEN_BETTER_AUTH_URL` must be exactly `https://den.company.local`. If you intentionally use HTTP on a private LAN, then use that exact HTTP origin consistently.
 
@@ -113,6 +114,7 @@ export DEN_WEB_ORIGIN=https://den.company.local
 export DEN_BETTER_AUTH_URL=$DEN_WEB_ORIGIN
 export DEN_BETTER_AUTH_TRUSTED_ORIGINS=$DEN_WEB_ORIGIN
 export DEN_CORS_ORIGINS=$DEN_WEB_ORIGIN
+export DEN_PROVISIONER_MODE=static
 export DEN_STATIC_WORKER_URLS=http://worker-01.company.local:8787,http://worker-02.company.local:8787
 export DEN_STATIC_WORKER_HEALTH_PATH=/health
 export DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS=10000
@@ -127,7 +129,13 @@ docker compose -p openwork-den-static -f packaging/docker/docker-compose.den-sta
 
 `DEN_STATIC_WORKER_URLS` is the pool of worker runtimes that Den can allocate.
 
-`DEN_STATIC_WORKER_TOKEN_MAP_JSON` must contain one entry for every worker URL that Den is allowed to attach as a shared worker.
+`DEN_STATIC_WORKER_TOKEN_MAP_JSON` must contain exactly one entry for every worker URL that Den is allowed to attach as a shared worker. Den normalizes the URL keys, selects one free URL under the static assignment lock, stores that URL with the matching `clientToken` and `hostToken`, and then verifies those same tokens against the pre-running worker runtime before marking the worker healthy.
+
+The token map values must match the worker's own `OPENWORK_TOKEN` and `OPENWORK_HOST_TOKEN`. Do not generate separate Den-only tokens for static workers.
+
+For UI-driven static attach of private/LAN worker URLs, configure the attach policy intentionally instead of allowing arbitrary private targets. Use `STATIC_WORKER_ATTACH_ALLOW_PRIVATE=true` only for trusted LAN deployments, or prefer narrower `STATIC_WORKER_ATTACH_ALLOWED_HOSTS` / `STATIC_WORKER_ATTACH_ALLOWED_CIDRS` entries for the worker hosts you operate.
+
+Entra SSO is separate operator configuration. If your deployment uses Entra ID, set the `DEN_ENTRA_*` variables in `docker-compose.den-static.yml` according to your tenant/app registration and group policy; static worker token mapping does not configure SSO automatically.
 
 ## Verify Deployment
 
@@ -165,6 +173,7 @@ Expected behavior:
 
 - Den picks the first free worker URL from `DEN_STATIC_WORKER_URLS`
 - Den calls `/health` on that worker URL
+- Den stores the matching token pair from `DEN_STATIC_WORKER_TOKEN_MAP_JSON` for the selected URL
 - Den verifies the configured client token against `/workspaces`
 - Den verifies the configured host token against `/env/keys`
 - Den marks the worker `healthy` only after the runtime contract succeeds

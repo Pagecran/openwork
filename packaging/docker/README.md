@@ -67,12 +67,13 @@ Optional env vars (via `.env` or `export`):
 - `DEN_PROVISIONER_MODE` — `stub`, `static`, `render`, or `daytona` (defaults to `stub`)
 - `DEN_WORKER_URL_TEMPLATE` — stub worker URL template with `{workerId}` placeholder
 - `DEN_STATIC_WORKER_URLS` — comma-separated LAN/local OpenWork worker URLs used when `DEN_PROVISIONER_MODE=static`; each URL is assigned to at most one active static worker instance
+- `DEN_STATIC_WORKER_TOKEN_MAP_JSON` — JSON object keyed by static worker URL; each entry must provide the worker runtime's matching `clientToken` and `hostToken`
 - `DEN_STATIC_WORKER_HEALTH_PATH` — health path checked for static workers (defaults to `/health`)
 - `DEN_STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS` — static worker health timeout (defaults to `10000`)
 
 ### On-prem/static worker mode
 
-Use static mode when Den is self-hosted on a LAN and workers are already running on local infrastructure. Den does not launch those workers; it assigns one configured URL that is not already used by an active static `worker_instance` to each cloud/shared worker request, checks the worker health endpoint, records a `worker_instance`, and marks the worker `healthy` only when the endpoint responds successfully.
+Use static mode when Den is self-hosted on a LAN and workers are already running on local infrastructure. Den does not launch those workers; it assigns one configured URL that is not already used by an active static `worker_instance` to each cloud/shared worker request, stores the token pair from `DEN_STATIC_WORKER_TOKEN_MAP_JSON` that matches the selected URL, checks `/health`, verifies the client token against `/workspaces`, verifies the host token against `/env/keys`, records a `worker_instance`, and marks the worker `healthy` only when the runtime contract succeeds.
 
 The real worker container path is the production container in this directory (`Dockerfile` + `docker-compose.yml`). The image builds the worker from the source checkout used as the Docker build context; use an approved checkout or release artifact for the version you intend to support.
 
@@ -81,6 +82,7 @@ Run Den against a real LAN worker:
 ```bash
 export DEN_PROVISIONER_MODE=static
 export DEN_STATIC_WORKER_URLS=http://192.168.1.50:8787
+export DEN_STATIC_WORKER_TOKEN_MAP_JSON='{"http://192.168.1.50:8787":{"clientToken":"<worker-client-token>","hostToken":"<worker-host-token>"}}'
 ./packaging/docker/den-dev-up.sh
 ```
 
@@ -89,6 +91,7 @@ If you need a non-production compose-only smoke test before wiring a real OpenWo
 ```bash
 export DEN_PROVISIONER_MODE=static
 export DEN_STATIC_WORKER_URLS=http://static-worker-smoke:8787
+export DEN_STATIC_WORKER_TOKEN_MAP_JSON='{"http://static-worker-smoke:8787":{"clientToken":"smoke-client-token","hostToken":"smoke-host-token"}}'
 docker compose --profile static-worker-smoke -p openwork-den-static \
   -f packaging/docker/docker-compose.den-dev.yml up --build
 ```
@@ -99,7 +102,7 @@ Validate the sample endpoint from the host:
 curl http://127.0.0.1:${DEN_STATIC_WORKER_SMOKE_PORT:-8787}/health
 ```
 
-Then create a cloud/shared worker in the Den web UI. With a reachable static worker URL, the worker should move from `provisioning` to `healthy` and show a `static` instance. If `DEN_STATIC_WORKER_URLS` is empty or the health check fails, Den marks the worker `failed` and logs a clear provisioning error instead of leaving it stuck on `Starting`.
+Then create a cloud/shared worker in the Den web UI only when the configured URL is a real OpenWork worker runtime with matching tokens. With a reachable static worker URL and matching token map entry, the worker should move from `provisioning` to `healthy` and show a `static` instance. If `DEN_STATIC_WORKER_URLS` is empty, the token map is missing/mismatched, or runtime verification fails, Den marks the worker `failed` and logs a clear provisioning error instead of leaving it stuck on `Starting`.
 
 The `static-worker-smoke` service is intentionally only a health-check simulation for provisioning validation; it is not a production OpenWork runtime and will not satisfy workspace/session APIs.
 
