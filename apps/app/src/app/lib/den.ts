@@ -1064,7 +1064,6 @@ function parseDenOrgLlmProvider(value: unknown): DenOrgLlmProvider | null {
     providerId: value.providerId,
     name: value.name,
     providerConfig: parseJsonRecord(value.providerConfig),
-    credentialKind: value.credentialKind === "opencode_oauth" ? "opencode_oauth" : "api_key",
     hasApiKey: value.hasApiKey === true,
     hasOpencodeAuth: value.hasOpencodeAuth === true,
     hasCredential: value.hasCredential === true || value.hasApiKey === true || value.hasOpencodeAuth === true,
