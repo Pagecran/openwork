@@ -957,13 +957,14 @@ export async function getOrganizationContextForUser(input: {
     },
     currentMember: {
       id: currentMember.id,
-      userId: currentMember.userId,
+      userId: input.userId,
       role: currentMember.role,
       createdAt: currentMember.createdAt,
       isOwner: roleIncludesOwner(currentMember.role),
     },
     members: members.map((member) => ({
       ...member,
+      userId: member.userId ?? member.user.id,
       isOwner: roleIncludesOwner(member.role),
     })),
     invitations,
