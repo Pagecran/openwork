@@ -107,7 +107,7 @@ const llmProviderWriteSchema = z.object({
   }
 
   if (value.credentialKind === "opencode_oauth") {
-    if (value.source === "models_dev" && !isOpencodeOauthProviderAllowed(value.providerId)) {
+    if (value.source !== "models_dev" || !isOpencodeOauthProviderAllowed(value.providerId)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["credentialKind"],
@@ -622,7 +622,7 @@ async function loadLlmProviders(input: {
     .from(LlmProviderAccessTable)
     .innerJoin(MemberTable, eq(LlmProviderAccessTable.orgMembershipId, MemberTable.id))
     .innerJoin(AuthUserTable, eq(MemberTable.userId, AuthUserTable.id))
-    .where(and(inArray(LlmProviderAccessTable.llmProviderId, providerIds), isNotNull(LlmProviderAccessTable.orgMembershipId)))
+    .where(and(inArray(LlmProviderAccessTable.llmProviderId, providerIds), isNotNull(LlmProviderAccessTable.orgMembershipId), isNull(MemberTable.removedAt)))
 
   const teamAccessRows = await db
     .select({

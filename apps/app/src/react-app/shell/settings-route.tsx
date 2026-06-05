@@ -131,6 +131,7 @@ import { abortSessionSafe } from "@/app/lib/opencode-session";
 import { useReloadCoordinator } from "./reload-coordinator";
 import { buildFeedbackUrl } from "@/app/lib/feedback";
 import { getDenInferenceUrl } from "@/app/lib/den";
+import { buildCloudManagedModelIdsByProvider } from "@/app/cloud/managed-provider-models";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "./session-memory";
 import { workspaceSessionRoute, workspaceSettingsRoute } from "./workspace-routes";
 import { getReactQueryClient } from "@/react-app/infra/query-client";
@@ -819,19 +820,10 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       Object.values(providerAuthSnapshot.importedCloudProviders ?? {}).some(isOpenWorkCloudProvider),
     [providerAuthSnapshot.cloudOrgProviders, providerAuthSnapshot.importedCloudProviders],
   );
-  const cloudManagedModelIdsByProvider = useMemo(() => {
-    const next = new Map<string, Set<string>>();
-    for (const imported of Object.values(providerAuthSnapshot.importedCloudProviders ?? {})) {
-      const providerId = imported.providerId?.trim();
-      if (!providerId) continue;
-      const modelIds = imported.modelIds
-        .map((id) => id.trim())
-        .filter(Boolean);
-      if (!modelIds.length) continue;
-      next.set(providerId, new Set(modelIds));
-    }
-    return next;
-  }, [providerAuthSnapshot.importedCloudProviders]);
+  const cloudManagedModelIdsByProvider = useMemo(
+    () => buildCloudManagedModelIdsByProvider(providerAuthSnapshot.importedCloudProviders),
+    [providerAuthSnapshot.importedCloudProviders],
+  );
   const [openWorkModelsPromoHidden, setOpenWorkModelsPromoHidden] = useState(isOpenWorkModelsPromoHidden);
   const showOpenWorkModelsSubscribe = (!cloudSession.isSignedIn || !hasOpenWorkCloudProvider) && !openWorkModelsPromoHidden;
 
