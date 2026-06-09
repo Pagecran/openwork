@@ -196,3 +196,12 @@ test("LLM provider migration journal remains valid JSON", async () => {
 
   expect(parsed.entries?.some((entry) => entry.tag === "0021_llm_provider_opencode_oauth")).toBe(true)
 })
+
+test("LLM provider OAuth migration snapshot metadata is present", async () => {
+  const snapshot = await readFile(new URL("../../../packages/den-db/drizzle/meta/0021_snapshot.json", import.meta.url), "utf8")
+  const parsed = JSON.parse(snapshot) as { tables?: Record<string, { columns?: Record<string, unknown> }> }
+  const llmProviderColumns = parsed.tables?.llm_provider?.columns ?? {}
+
+  expect("credential_kind" in llmProviderColumns).toBe(true)
+  expect("opencode_auth" in llmProviderColumns).toBe(true)
+})
