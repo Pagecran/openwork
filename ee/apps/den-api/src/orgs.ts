@@ -906,7 +906,7 @@ export async function getOrganizationContextForUser(input: {
   const members = await db
     .select({
       id: MemberTable.id,
-      userId: MemberTable.userId,
+      userId: AuthUserTable.id,
       role: MemberTable.role,
       createdAt: MemberTable.createdAt,
       user: {
@@ -957,7 +957,7 @@ export async function getOrganizationContextForUser(input: {
     },
     currentMember: {
       id: currentMember.id,
-      userId: currentMember.userId,
+      userId: input.userId,
       role: currentMember.role,
       createdAt: currentMember.createdAt,
       isOwner: roleIncludesOwner(currentMember.role),

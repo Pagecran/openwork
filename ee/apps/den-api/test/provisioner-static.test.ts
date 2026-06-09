@@ -169,6 +169,13 @@ beforeAll(async () => {
     },
   })
   staticWorkerUrl = `http://127.0.0.1:${server.port}`
+  process.env.STATIC_WORKER_URLS = staticWorkerUrl
+  process.env.STATIC_WORKER_TOKEN_MAP_JSON = JSON.stringify({
+    [staticWorkerUrl]: {
+      clientToken: "valid-client-token",
+      hostToken: "valid-host-token",
+    },
+  })
   envModule = await import("../src/env.js")
   provisionerModule = await import("../src/workers/provisioner.js")
   workersSharedModule = await import("../src/routes/workers/shared.js")
