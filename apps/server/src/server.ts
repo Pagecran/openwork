@@ -363,7 +363,6 @@ async function fetchOpenworkWorkspaceList(hostUrl: string, token: string, hostTo
   const timeout = setTimeout(() => controller.abort(), 8_000);
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (hostToken) headers.set("X-OpenWork-Host-Token", hostToken);
 
   try {
     const response = await fetch(url, { headers, signal: controller.signal });
@@ -1248,10 +1247,6 @@ async function fetchOpencodeJson(
 }
 
 async function requireClient(request: Request, config: ServerConfig, tokens: TokenService): Promise<Actor> {
-  const hostToken = request.headers.get("x-openwork-host-token");
-  if (hostToken && hostToken === config.hostToken) {
-    return { type: "host", tokenHash: hashToken(hostToken), scope: "owner" };
-  }
   const header = request.headers.get("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
   const token = match?.[1];
@@ -5349,9 +5344,6 @@ async function requireApproval(
   input: Omit<ApprovalRequest, "id" | "createdAt" | "actor">,
 ): Promise<void> {
   const actor = ctx.actor ?? { type: "remote" };
-  if (actor.type === "host") {
-    return;
-  }
   const result = await ctx.approvals.requestApproval({ ...input, actor });
   if (!result.allowed) {
     throw new ApiError(403, "write_denied", "Write request denied", {
