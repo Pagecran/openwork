@@ -1056,6 +1056,11 @@ function withCors(response: Response, request: Request, config: ServerConfig) {
 }
 
 async function requireClient(request: Request, config: ServerConfig, tokens: TokenService): Promise<Actor> {
+  const hostToken = request.headers.get("x-openwork-host-token");
+  if (hostToken && hostToken === config.hostToken) {
+    return { type: "host", tokenHash: hashToken(hostToken), scope: "owner" };
+  }
+
   const header = request.headers.get("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
   const token = match?.[1];
@@ -2330,7 +2335,12 @@ function createRoutes(
       ? stripOpenworkWorkspaceMount(rawOpenworkHostUrl ?? baseUrl)
       : rawOpenworkHostUrl;
     const openworkToken = readStringField(body, "openworkToken");
+    const openworkClientToken = readStringField(body, "openworkClientToken");
     const openworkHostToken = readStringField(body, "openworkHostToken");
+    const openworkDenBaseUrl = readStringField(body, "openworkDenBaseUrl");
+    const openworkDenApiBaseUrl = readStringField(body, "openworkDenApiBaseUrl");
+    const openworkDenOrgId = readStringField(body, "openworkDenOrgId");
+    const openworkDenWorkerId = readStringField(body, "openworkDenWorkerId");
     const sandboxBackend = readStringField(body, "sandboxBackend");
     const sandboxRunId = readStringField(body, "sandboxRunId");
     const sandboxContainerName = readStringField(body, "sandboxContainerName");
@@ -2375,6 +2385,12 @@ function createRoutes(
       ...(displayName ? { displayName } : {}),
       ...(remoteType === "openwork" && openworkHostUrl ? { openworkHostUrl } : {}),
       ...(openworkToken ? { openworkToken } : {}),
+      ...(remoteType === "openwork" && openworkClientToken ? { openworkClientToken } : {}),
+      ...(remoteType === "openwork" && openworkHostToken ? { openworkHostToken } : {}),
+      ...(remoteType === "openwork" && openworkDenBaseUrl ? { openworkDenBaseUrl } : {}),
+      ...(remoteType === "openwork" && openworkDenApiBaseUrl ? { openworkDenApiBaseUrl } : {}),
+      ...(remoteType === "openwork" && openworkDenOrgId ? { openworkDenOrgId } : {}),
+      ...(remoteType === "openwork" && openworkDenWorkerId ? { openworkDenWorkerId } : {}),
       ...(remoteType === "openwork" && openworkWorkspaceId ? { openworkWorkspaceId } : {}),
       ...(remoteType === "openwork" && openworkWorkspaceName ? { openworkWorkspaceName } : {}),
       ...(sandboxBackend ? { sandboxBackend } : {}),
@@ -4636,6 +4652,12 @@ function serializeWorkspaceConfigEntry(workspace: WorkspaceInfo): Record<string,
     ...(workspace.displayName ? { displayName: workspace.displayName } : {}),
     ...(workspace.openworkHostUrl ? { openworkHostUrl: workspace.openworkHostUrl } : {}),
     ...(workspace.openworkToken ? { openworkToken: workspace.openworkToken } : {}),
+    ...(workspace.openworkClientToken ? { openworkClientToken: workspace.openworkClientToken } : {}),
+    ...(workspace.openworkHostToken ? { openworkHostToken: workspace.openworkHostToken } : {}),
+    ...(workspace.openworkDenBaseUrl ? { openworkDenBaseUrl: workspace.openworkDenBaseUrl } : {}),
+    ...(workspace.openworkDenApiBaseUrl ? { openworkDenApiBaseUrl: workspace.openworkDenApiBaseUrl } : {}),
+    ...(workspace.openworkDenOrgId ? { openworkDenOrgId: workspace.openworkDenOrgId } : {}),
+    ...(workspace.openworkDenWorkerId ? { openworkDenWorkerId: workspace.openworkDenWorkerId } : {}),
     ...(workspace.openworkWorkspaceId ? { openworkWorkspaceId: workspace.openworkWorkspaceId } : {}),
     ...(workspace.openworkWorkspaceName ? { openworkWorkspaceName: workspace.openworkWorkspaceName } : {}),
     ...(workspace.sandboxBackend ? { sandboxBackend: workspace.sandboxBackend } : {}),
@@ -4748,9 +4770,17 @@ async function readOpenworkConfigForStatus(workspaceRoot: string): Promise<{
 
 function resolveOpencodeDirectory(workspace: WorkspaceInfo): string | null {
   const explicit = workspace.directory?.trim() ?? "";
+  if (workspace.remoteType === "openwork" && (isWindowsDirectory(explicit) || isWindowsDirectory(workspace.path))) {
+    return null;
+  }
   if (explicit) return normalizeOpencodeDirectory(explicit);
   if (workspace.workspaceType === "local") return normalizeOpencodeDirectory(workspace.path);
   return null;
+}
+
+function isWindowsDirectory(directory: string | undefined): boolean {
+  const value = directory?.trim() ?? "";
+  return /^[a-z]:[\\/]/i.test(value) || value.startsWith("\\\\") || value.startsWith("//");
 }
 
 function normalizeOpencodeDirectory(directory: string): string {
@@ -4822,6 +4852,9 @@ async function requireApproval(
   input: Omit<ApprovalRequest, "id" | "createdAt" | "actor">,
 ): Promise<void> {
   const actor = ctx.actor ?? { type: "remote" };
+  if (actor.type === "host") {
+    return;
+  }
   const result = await ctx.approvals.requestApproval({ ...input, actor });
   if (!result.allowed) {
     throw new ApiError(403, "write_denied", "Write request denied", {
