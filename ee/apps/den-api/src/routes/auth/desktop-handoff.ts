@@ -40,6 +40,13 @@ const grantNotFoundSchema = z.object({
   message: z.string(),
 }).meta({ ref: "DesktopHandoffGrantNotFoundError" })
 
+class DesktopHandoffBaseUrlError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "DesktopHandoffBaseUrlError"
+  }
+}
+
 function readSingleHeader(value: string | null) {
   const first = value?.split(",")[0]?.trim() ?? ""
   return first || null
@@ -114,7 +121,7 @@ function withDenProxyPath(origin: string) {
   return url.toString().replace(/\/+$/, "")
 }
 
-function resolveDesktopDenBaseUrl(request: Request) {
+export function resolveDesktopDenBaseUrl(request: Request) {
   const originHeader = readSingleHeader(request.headers.get("origin"))
   if (originHeader) {
     try {
@@ -136,7 +143,7 @@ function resolveDesktopDenBaseUrl(request: Request) {
   const protocol = forwardedProto ?? new URL(request.url).protocol.replace(/:$/, "")
   const targetHost = forwardedHost ?? host
   if (!targetHost) {
-    return "https://app.openworklabs.com/api/den"
+    throw new DesktopHandoffBaseUrlError("Desktop handoff requires a valid request host or forwarded host.")
   }
 
   const origin = `${protocol}://${targetHost}`
@@ -145,17 +152,10 @@ function resolveDesktopDenBaseUrl(request: Request) {
     if (isWebAppHost(url.hostname) || isConfiguredBrowserOrigin(url.origin)) {
       return withDenProxyPath(url.origin)
     }
+    return origin
   } catch {
-    // Ignore invalid forwarded origins.
+    throw new DesktopHandoffBaseUrlError("Desktop handoff could not resolve a trusted Den base URL from request configuration.")
   }
-
-  try {
-    return withDenProxyPath(new URL(env.betterAuthUrl).origin)
-  } catch {
-    // Ignore invalid configured URL.
-  }
-
-  return "https://app.openworklabs.com/api/den"
 }
 
 function buildOpenworkDeepLink(input: {
@@ -208,7 +208,15 @@ export function registerDesktopAuthRoutes<T extends { Variables: AuthContextVari
       consumed_at: null,
     })
 
-    const denBaseUrl = resolveDesktopDenBaseUrl(c.req.raw)
+    let denBaseUrl: string
+    try {
+      denBaseUrl = resolveDesktopDenBaseUrl(c.req.raw)
+    } catch (error) {
+      if (error instanceof DesktopHandoffBaseUrlError) {
+        return c.json({ error: "desktop_handoff_base_url_invalid", message: error.message }, 400)
+      }
+      throw error
+    }
 
     return c.json({
       grant,

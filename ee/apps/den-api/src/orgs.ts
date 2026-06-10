@@ -591,7 +591,6 @@ async function acceptInvitation(invitation: InvitationRow, userId: UserId) {
 
   if (!member) {
     member = await claimInvitationPlaceholderMember({ invitation, userId, role })
-    createdMember = Boolean(member)
   }
 
   if (!member) {
