@@ -18,6 +18,7 @@ import {
   attachStaticWorkerSchema,
   canAttachStaticWorkerForMember,
   canReadStaticWorkerTokensForMember,
+  cleanupStaleStaticReservations,
   createWorkerSchema,
   deleteWorkerCascade,
   getLatestWorkerInstance,
@@ -327,6 +328,7 @@ export function registerStaticWorkerAttachRoute(app: Hono<{ Variables: WorkerRou
     }
 
     const normalizedUrl = validatedUrl.url
+    await cleanupStaleStaticReservations()
     const existing = await findActiveStaticWorkerByUrl(data, normalizedUrl)
     if (existing.length > 0) {
       return c.json(staticAttachDuplicateResponse(), 409)
@@ -347,6 +349,7 @@ export function registerStaticWorkerAttachRoute(app: Hono<{ Variables: WorkerRou
     const now = new Date()
 
     const insertResult = await lock(async (tx) => {
+      await cleanupStaleStaticReservations()
       const duplicateRows = await findActiveStaticWorkerByUrl(tx, normalizedUrl)
       if (duplicateRows.length > 0) {
         return { status: "duplicate" as const }
@@ -560,6 +563,7 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
 
       if (env.provisionerMode === "static") {
         const prepared = await withStaticAssignmentMutex(async () => {
+          await cleanupStaleStaticReservations()
           const workerLimit = await getOrganizationLimitStatus(orgId, "workers")
           if (workerLimit.exceeded) {
             return { response: c.json({

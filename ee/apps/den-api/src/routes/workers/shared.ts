@@ -704,6 +704,10 @@ async function markStaleStaticReservationsFailed(tx: StaticAssignmentDb) {
     )
 }
 
+export async function cleanupStaleStaticReservations() {
+  await db.transaction(async (tx) => markStaleStaticReservationsFailed(tx))
+}
+
 export function readMySqlLockAcquired(result: unknown) {
   const rows = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result
   if (!Array.isArray(rows)) {
@@ -791,13 +795,6 @@ async function reserveStaticWorkerInstance(input: {
   staticLockHeld?: boolean
 }) {
   const reserve = async (tx: StaticAssignmentDb) => {
-    await markStaleStaticReservationsFailed(tx)
-
-    const workerLimit = await getOrganizationLimitStatus(input.orgId, "workers")
-    if (workerLimit.currentCount > workerLimit.limit) {
-      throw new Error("Organization worker limit exceeded")
-    }
-
     const rows = await tx
       .select({ url: WorkerInstanceTable.url })
       .from(WorkerInstanceTable)
@@ -837,7 +834,18 @@ async function reserveStaticWorkerInstance(input: {
     return { instanceId, url, tokens }
   }
 
-  return input.staticLockHeld ? db.transaction(reserve) : withStaticAssignmentLock(reserve)
+  if (input.staticLockHeld) {
+    return db.transaction(reserve)
+  }
+
+  return withStaticAssignmentMutex(async () => {
+    await cleanupStaleStaticReservations()
+    const workerLimit = await getOrganizationLimitStatus(input.orgId, "workers")
+    if (workerLimit.currentCount > workerLimit.limit) {
+      throw new Error("Organization worker limit exceeded")
+    }
+    return db.transaction(reserve)
+  })
 }
 
 export async function reserveStaticWorkerForCreatedWorker(input: {

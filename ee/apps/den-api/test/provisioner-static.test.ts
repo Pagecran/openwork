@@ -43,6 +43,13 @@ mock.module("../src/db.js", () => ({
   denDb: {},
   db: {
     select: () => ({ from: (table: unknown) => dbQueryFor(table) }),
+    delete: () => ({ where: () => Promise.resolve() }),
+    update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+    transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      select: () => ({ from: (table: unknown) => dbQueryFor(table) }),
+      delete: () => ({ where: () => Promise.resolve() }),
+      update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
+    }),
   },
 }))
 
