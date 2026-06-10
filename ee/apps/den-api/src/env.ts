@@ -1,4 +1,5 @@
 import { DEN_WORKER_POLL_INTERVAL_MS } from "./CONSTS.js"
+import { parseEntraSsoEnv, validateEntraSsoEnv } from "./entra-sso.js"
 import { z } from "zod"
 
 const EnvSchema = z.object({
@@ -21,6 +22,14 @@ const EnvSchema = z.object({
   GITHUB_CONNECTOR_APP_WEBHOOK_SECRET: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  DEN_ENTRA_TENANT_ID: z.string().optional(),
+  DEN_ENTRA_CLIENT_ID: z.string().optional(),
+  DEN_ENTRA_CLIENT_SECRET: z.string().optional(),
+  DEN_ENTRA_AUTO_JOIN_ENABLED: z.string().optional(),
+  DEN_ENTRA_AUTO_JOIN_ORG_ID: z.string().optional(),
+  DEN_ENTRA_AUTO_JOIN_ORG_SLUG: z.string().optional(),
+  DEN_ENTRA_ADMIN_GROUP_IDS: z.string().optional(),
+  DEN_ENTRA_MEMBER_GROUP_IDS: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
   DEN_REQUIRE_EMAIL_VERIFICATION: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
@@ -34,8 +43,17 @@ const EnvSchema = z.object({
   PORT: z.string().optional(),
   CORS_ORIGINS: z.string().optional(),
   WORKER_PROXY_PORT: z.string().optional(),
-  PROVISIONER_MODE: z.enum(["stub", "render", "daytona"]).optional(),
+  PROVISIONER_MODE: z.enum(["stub", "render", "daytona", "static"]).optional(),
   WORKER_URL_TEMPLATE: z.string().optional(),
+  STATIC_WORKER_URLS: z.string().optional(),
+  STATIC_WORKER_HEALTH_PATH: z.string().optional(),
+  STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS: z.string().optional(),
+  STATIC_WORKER_HEALTHCHECK_INTERVAL_MS: z.string().optional(),
+  STATIC_WORKER_RESERVATION_TTL_MS: z.string().optional(),
+  STATIC_WORKER_TOKEN_MAP_JSON: z.string().optional(),
+  STATIC_WORKER_ATTACH_ALLOW_PRIVATE: z.string().optional(),
+  STATIC_WORKER_ATTACH_ALLOWED_HOSTS: z.string().optional(),
+  STATIC_WORKER_ATTACH_ALLOWED_CIDRS: z.string().optional(),
   WORKER_ACTIVITY_BASE_URL: z.string().optional(),
   OPENWORK_DAYTONA_ENV_PATH: z.string().optional(),
   RENDER_API_BASE: z.string().optional(),
@@ -123,6 +141,25 @@ const EnvSchema = z.object({
       }
     }
   }
+
+  if (value.PROVISIONER_MODE === "static") {
+    const staticConfig = parseStaticWorkersEnv(value)
+    for (const issue of staticConfig.issues) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: issue.message,
+        path: [issue.path],
+      })
+    }
+  }
+
+  for (const issue of validateEntraSsoEnv(value)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: issue.message,
+      path: [issue.path],
+    })
+  }
 })
 
 const parsed = EnvSchema.parse(process.env)
@@ -147,6 +184,226 @@ function normalizeOrigin(origin: string) {
   return value.replace(/\/+$/, "")
 }
 
+type StaticWorkersEnvInput = {
+  STATIC_WORKER_URLS?: string
+  STATIC_WORKER_HEALTH_PATH?: string
+  STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS?: string
+  STATIC_WORKER_HEALTHCHECK_INTERVAL_MS?: string
+  STATIC_WORKER_RESERVATION_TTL_MS?: string
+  STATIC_WORKER_TOKEN_MAP_JSON?: string
+  STATIC_WORKER_ATTACH_ALLOW_PRIVATE?: string
+  STATIC_WORKER_ATTACH_ALLOWED_HOSTS?: string
+  STATIC_WORKER_ATTACH_ALLOWED_CIDRS?: string
+}
+
+type StaticWorkersEnvIssue = {
+  path: keyof StaticWorkersEnvInput
+  message: string
+}
+
+type StaticWorkerTokenPair = {
+  clientToken: string
+  hostToken: string
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number) {
+  const raw = value?.trim()
+  if (!raw) {
+    return fallback
+  }
+  const parsedValue = Number(raw)
+  return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : null
+}
+
+function normalizeStaticWorkerUrl(value: string) {
+  const parsedUrl = new URL(value.trim())
+  parsedUrl.hash = ""
+  parsedUrl.search = ""
+  parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, "")
+  const serialized = parsedUrl.toString().replace(/\/+$/, "")
+  return serialized
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function parseStaticWorkerTokenPair(value: unknown) {
+  if (!isRecord(value)) {
+    return null
+  }
+  const clientToken = typeof value.clientToken === "string" ? value.clientToken.trim() : ""
+  const hostToken = typeof value.hostToken === "string" ? value.hostToken.trim() : ""
+  return clientToken && hostToken ? { clientToken, hostToken } : null
+}
+
+export function parseStaticWorkersEnv(input: StaticWorkersEnvInput) {
+  const issues: StaticWorkersEnvIssue[] = []
+  const urls: string[] = []
+  const seenUrls = new Set<string>()
+  const tokenMap: Record<string, StaticWorkerTokenPair> = {}
+
+  for (const rawUrl of splitCsv(input.STATIC_WORKER_URLS)) {
+    let normalizedUrl: string
+    try {
+      const parsedUrl = new URL(rawUrl)
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        issues.push({
+          path: "STATIC_WORKER_URLS",
+          message: "STATIC_WORKER_URLS entries must use http or https URLs",
+        })
+        continue
+      }
+      normalizedUrl = normalizeStaticWorkerUrl(rawUrl)
+    } catch {
+      issues.push({
+        path: "STATIC_WORKER_URLS",
+        message: "STATIC_WORKER_URLS entries must be valid URLs",
+      })
+      continue
+    }
+
+    if (seenUrls.has(normalizedUrl)) {
+      issues.push({
+        path: "STATIC_WORKER_URLS",
+        message: `STATIC_WORKER_URLS contains duplicate URL ${normalizedUrl}`,
+      })
+      continue
+    }
+
+    seenUrls.add(normalizedUrl)
+    urls.push(normalizedUrl)
+  }
+
+  if (urls.length === 0) {
+    issues.push({
+      path: "STATIC_WORKER_URLS",
+      message: "STATIC_WORKER_URLS is required when PROVISIONER_MODE=static",
+    })
+  }
+
+  const rawTokenMap = optionalString(input.STATIC_WORKER_TOKEN_MAP_JSON)
+  if (!rawTokenMap) {
+    issues.push({
+      path: "STATIC_WORKER_TOKEN_MAP_JSON",
+      message: "STATIC_WORKER_TOKEN_MAP_JSON is required when PROVISIONER_MODE=static",
+    })
+  } else {
+    try {
+      const parsedTokenMap: unknown = JSON.parse(rawTokenMap)
+      if (!isRecord(parsedTokenMap)) {
+        issues.push({
+          path: "STATIC_WORKER_TOKEN_MAP_JSON",
+          message: "STATIC_WORKER_TOKEN_MAP_JSON must be a JSON object keyed by worker URL",
+        })
+      } else {
+        for (const [rawUrl, rawPair] of Object.entries(parsedTokenMap)) {
+          let normalizedUrl: string
+          try {
+            normalizedUrl = normalizeStaticWorkerUrl(rawUrl)
+          } catch {
+            issues.push({
+              path: "STATIC_WORKER_TOKEN_MAP_JSON",
+              message: "STATIC_WORKER_TOKEN_MAP_JSON keys must be valid worker URLs",
+            })
+            continue
+          }
+
+          const pair = parseStaticWorkerTokenPair(rawPair)
+          if (!pair) {
+            issues.push({
+              path: "STATIC_WORKER_TOKEN_MAP_JSON",
+              message: `STATIC_WORKER_TOKEN_MAP_JSON entry for ${normalizedUrl} must include non-empty clientToken and hostToken`,
+            })
+            continue
+          }
+          if (Object.prototype.hasOwnProperty.call(tokenMap, normalizedUrl)) {
+            issues.push({
+              path: "STATIC_WORKER_TOKEN_MAP_JSON",
+              message: `STATIC_WORKER_TOKEN_MAP_JSON contains duplicate key for ${normalizedUrl}`,
+            })
+            continue
+          }
+          tokenMap[normalizedUrl] = pair
+        }
+
+        for (const url of urls) {
+          if (!tokenMap[url]) {
+            issues.push({
+              path: "STATIC_WORKER_TOKEN_MAP_JSON",
+              message: `STATIC_WORKER_TOKEN_MAP_JSON is missing token pair for ${url}`,
+            })
+          }
+        }
+
+        const configuredUrls = new Set(urls)
+        for (const url of Object.keys(tokenMap)) {
+          if (!configuredUrls.has(url)) {
+            issues.push({
+              path: "STATIC_WORKER_TOKEN_MAP_JSON",
+              message: `STATIC_WORKER_TOKEN_MAP_JSON contains token pair for unconfigured URL ${url}`,
+            })
+          }
+        }
+      }
+    } catch {
+      issues.push({
+        path: "STATIC_WORKER_TOKEN_MAP_JSON",
+        message: "STATIC_WORKER_TOKEN_MAP_JSON must be valid JSON",
+      })
+    }
+  }
+
+  const healthPath = optionalString(input.STATIC_WORKER_HEALTH_PATH) ?? "/health"
+  if (!healthPath.startsWith("/") || healthPath.startsWith("//") || healthPath.includes("?")) {
+    issues.push({
+      path: "STATIC_WORKER_HEALTH_PATH",
+      message: "STATIC_WORKER_HEALTH_PATH must be an absolute path such as /health",
+    })
+  }
+
+  const healthcheckTimeoutMs = parsePositiveInteger(input.STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS, 10000)
+  if (healthcheckTimeoutMs === null) {
+    issues.push({
+      path: "STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS",
+      message: "STATIC_WORKER_HEALTHCHECK_TIMEOUT_MS must be a positive integer",
+    })
+  }
+
+  const healthcheckIntervalMs = parsePositiveInteger(input.STATIC_WORKER_HEALTHCHECK_INTERVAL_MS, 1000)
+  if (healthcheckIntervalMs === null) {
+    issues.push({
+      path: "STATIC_WORKER_HEALTHCHECK_INTERVAL_MS",
+      message: "STATIC_WORKER_HEALTHCHECK_INTERVAL_MS must be a positive integer",
+    })
+  }
+
+  const reservationTtlMs = parsePositiveInteger(input.STATIC_WORKER_RESERVATION_TTL_MS, 300000)
+  if (reservationTtlMs === null) {
+    issues.push({
+      path: "STATIC_WORKER_RESERVATION_TTL_MS",
+      message: "STATIC_WORKER_RESERVATION_TTL_MS must be a positive integer",
+    })
+  }
+
+  const allowPrivateAttach = (input.STATIC_WORKER_ATTACH_ALLOW_PRIVATE ?? "false").trim().toLowerCase() === "true"
+  const attachAllowedHosts = splitCsv(input.STATIC_WORKER_ATTACH_ALLOWED_HOSTS).map((host) => host.toLowerCase())
+  const attachAllowedCidrs = splitCsv(input.STATIC_WORKER_ATTACH_ALLOWED_CIDRS)
+
+  return {
+    urls,
+    healthPath,
+    healthcheckTimeoutMs: healthcheckTimeoutMs ?? 10000,
+    healthcheckIntervalMs: healthcheckIntervalMs ?? 1000,
+    reservationTtlMs: reservationTtlMs ?? 300000,
+    tokenMap,
+    allowPrivateAttach,
+    attachAllowedHosts,
+    attachAllowedCidrs,
+    issues,
+  }
+}
+
 const corsOrigins = splitCsv(parsed.CORS_ORIGINS).map((origin) => normalizeOrigin(origin))
 const betterAuthTrustedOrigins = splitCsv(parsed.DEN_BETTER_AUTH_TRUSTED_ORIGINS)
   .map((origin) => normalizeOrigin(origin))
@@ -159,6 +416,7 @@ const requireEmailVerification = parsed.DEN_REQUIRE_EMAIL_VERIFICATION === undef
   ? !devMode
   : parsed.DEN_REQUIRE_EMAIL_VERIFICATION.trim().toLowerCase() !== "false"
 const port = Number(parsed.PORT ?? "8790")
+const staticWorkers = parseStaticWorkersEnv(parsed)
 
 const daytonaSandboxPublic =
   (parsed.DAYTONA_SANDBOX_PUBLIC ?? "false").toLowerCase() === "true"
@@ -202,6 +460,7 @@ export const env = {
     clientId: optionalString(parsed.GOOGLE_CLIENT_ID),
     clientSecret: optionalString(parsed.GOOGLE_CLIENT_SECRET),
   },
+  entra: parseEntraSsoEnv(parsed),
   email: {
     from: optionalString(parsed.EMAIL_FROM),
   },
@@ -223,6 +482,17 @@ export const env = {
   corsOrigins,
   provisionerMode: parsed.PROVISIONER_MODE ?? "daytona",
   workerUrlTemplate: parsed.WORKER_URL_TEMPLATE,
+  staticWorkers: {
+    urls: staticWorkers.urls,
+    healthPath: staticWorkers.healthPath,
+    healthcheckTimeoutMs: staticWorkers.healthcheckTimeoutMs,
+    healthcheckIntervalMs: staticWorkers.healthcheckIntervalMs,
+    reservationTtlMs: staticWorkers.reservationTtlMs,
+    tokenMap: staticWorkers.tokenMap,
+    allowPrivateAttach: staticWorkers.allowPrivateAttach,
+    attachAllowedHosts: staticWorkers.attachAllowedHosts,
+    attachAllowedCidrs: staticWorkers.attachAllowedCidrs,
+  },
   workerActivityBaseUrl:
     optionalString(parsed.WORKER_ACTIVITY_BASE_URL) ??
     parsed.BETTER_AUTH_URL.trim().replace(/\/+$/, ""),

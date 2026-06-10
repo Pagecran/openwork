@@ -97,7 +97,6 @@ import { useCheckDesktopRestriction, useDesktopConfig } from "@/react-app/domain
 import { useRestrictionNotice } from "@/react-app/domains/cloud/restriction-notice-provider";
 import { useCloudProviderAutoSync } from "@/react-app/domains/cloud/use-cloud-provider-auto-sync";
 import {
-  hasOpenWorkModelsProvider,
   hideOpenWorkModelsPromo,
   isOpenWorkModelsPromoHidden,
   openWorkModelsPromoChangedEvent,
@@ -132,6 +131,7 @@ import { abortSessionSafe } from "@/app/lib/opencode-session";
 import { useReloadCoordinator } from "./reload-coordinator";
 import { buildFeedbackUrl } from "@/app/lib/feedback";
 import { getDenInferenceUrl } from "@/app/lib/den";
+import { buildCloudManagedModelIdsByProvider, buildCloudManagedModelOptions } from "@/app/cloud/managed-provider-models";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "./session-memory";
 import { workspaceSessionRoute, workspaceSettingsRoute } from "./workspace-routes";
 import { getReactQueryClient } from "@/react-app/infra/query-client";
@@ -593,6 +593,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
     () =>
       selectedWorkspace
         ? {
+            ...selectedWorkspace,
             id: selectedWorkspace.id,
             name: selectedWorkspace.name ?? selectedWorkspace.displayNameResolved,
             path: selectedWorkspace.path ?? "",
@@ -819,12 +820,12 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       Object.values(providerAuthSnapshot.importedCloudProviders ?? {}).some(isOpenWorkCloudProvider),
     [providerAuthSnapshot.cloudOrgProviders, providerAuthSnapshot.importedCloudProviders],
   );
+  const cloudManagedModelIdsByProvider = useMemo(
+    () => buildCloudManagedModelIdsByProvider(providerAuthSnapshot.importedCloudProviders),
+    [providerAuthSnapshot.importedCloudProviders],
+  );
   const [openWorkModelsPromoHidden, setOpenWorkModelsPromoHidden] = useState(isOpenWorkModelsPromoHidden);
-  const openWorkModelsConnected =
-    (cloudSession.isSignedIn && hasOpenWorkCloudProvider) ||
-    hasOpenWorkModelsProvider(providerConnectedIds);
-  const showOpenWorkModelsSubscribe = !openWorkModelsConnected && !openWorkModelsPromoHidden;
-  const showOpenWorkModelsConnect = !openWorkModelsConnected && openWorkModelsPromoHidden;
+  const showOpenWorkModelsSubscribe = (!cloudSession.isSignedIn || !hasOpenWorkCloudProvider) && !openWorkModelsPromoHidden;
 
   useEffect(() => {
     const handlePromoChanged = () => setOpenWorkModelsPromoHidden(isOpenWorkModelsPromoHidden());
@@ -925,7 +926,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   );
   const opencodeBaseUrl = selectedWorkspaceEndpoint?.opencodeBaseUrl ?? "";
   const runtimeWorkspaceId = selectedWorkspaceEndpoint?.workspaceId ?? selectedWorkspace?.id ?? null;
+  const workspaceOpenworkClient = selectedWorkspaceEndpoint?.client ?? openworkClient;
   routeStateRef.current.runtimeWorkspaceId = runtimeWorkspaceId;
+  routeStateRef.current.openworkServerClient = workspaceOpenworkClient;
+  routeStateRef.current.openworkServerStatus = workspaceOpenworkClient ? "connected" : "disconnected";
+  routeStateRef.current.openworkServerCapabilities = workspaceOpenworkClient ? ROUTE_OPENWORK_CAPABILITIES : null;
 
   const opencodeClient = useMemo(() => {
     if (!selectedWorkspaceEndpoint || !selectedWorkspaceEndpoint.token) return null;
@@ -1211,28 +1216,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
         } catch {
           seenIds = new Set();
         }
-        const options: ModelOption[] = [];
-        for (const provider of getConnectedProviderItems(data)) {
-          const modelIds = Object.keys(provider.models);
-          const isNew = !seenIds.has(provider.id);
-          for (const id of modelIds) {
-            const model = provider.models[id];
-            options.push({
-              providerID: provider.id,
-              modelID: id,
-              title: model.name || id,
-              description: provider.name,
-              behaviorTitle: "Reasoning",
-              behaviorLabel: "Default",
-              behaviorDescription: "",
-              behaviorValue: null,
-              isFree: false,
-              isConnected: true,
-              isRecommended: isNew,
-              source: /^lpr_/i.test(provider.id) ? "cloud" as const : undefined,
-            });
-          }
-        }
+        const options = buildCloudManagedModelOptions({
+          providers: getConnectedProviderItems(data),
+          cloudManagedModelIdsByProvider,
+          isRecommendedProvider: (providerId) => !seenIds.has(providerId),
+        });
         setModelOptions(options);
       } catch (error) {
         toast.error(
@@ -1245,7 +1233,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [modelPickerOpen, opencodeBaseUrl, opencodeClient, selectedWorkspaceRoot]);
+  }, [cloudManagedModelIdsByProvider, modelPickerOpen, opencodeBaseUrl, opencodeClient, selectedWorkspaceRoot]);
 
   useEffect(() => {
     local.setUi((previous) => ({ ...previous, view: "settings", tab: route.tab }));
@@ -1600,10 +1588,6 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   // signed in (dev #1509 "auto-sync cloud providers"). Mounted here because
   // the settings route owns the provider-auth store.
   useCloudProviderAutoSync(providerAuthStore.runCloudProviderSync);
-
-  // Keep the Den cloud MCP configured with a fresh first-party token while
-  // signed in: connects on sign-in, re-mints on org switch and before expiry.
-  useCloudProviderAutoSync(() => connectionsStore.syncCloudControlMcp());
 
   useEffect(() => {
     if (route.tab !== "cloud-providers") return;
@@ -1974,6 +1958,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   const handleCreateRemoteWorkspace = async (input: {
     openworkHostUrl?: string | null;
     openworkToken?: string | null;
+    openworkClientToken?: string | null;
+    openworkHostToken?: string | null;
+    openworkDenBaseUrl?: string | null;
+    openworkDenOrgId?: string | null;
+    openworkDenWorkerId?: string | null;
     directory?: string | null;
     displayName?: string | null;
   }) => {
@@ -1987,6 +1976,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
         baseUrl: baseUrlValue,
         openworkHostUrl: baseUrlValue,
         openworkToken: input.openworkToken?.trim() || null,
+        openworkClientToken: input.openworkClientToken?.trim() || null,
+        openworkHostToken: input.openworkHostToken?.trim() || null,
+        openworkDenBaseUrl: input.openworkDenBaseUrl?.trim() || null,
+        openworkDenOrgId: input.openworkDenOrgId?.trim() || null,
+        openworkDenWorkerId: input.openworkDenWorkerId?.trim() || null,
         displayName: input.displayName?.trim() || null,
         directory: input.directory?.trim() || null,
         remoteType,
@@ -2120,7 +2114,6 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
               Object.values(providerAuthSnapshot.importedCloudProviders ?? {}).map((p) => p.providerId)
             )}
             showOpenWorkModelsSubscribe={showOpenWorkModelsSubscribe}
-            showOpenWorkModelsConnect={showOpenWorkModelsConnect}
             onSubscribeOpenWorkModels={subscribeToOpenWorkModels}
             onDismissOpenWorkModels={dismissOpenWorkModelsPromo}
             cloudProvidersView={
@@ -2207,7 +2200,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
                 mcpConnectingName={connectionsSnapshot.mcpConnectingName}
                 selectedMcp={connectionsSnapshot.selectedMcp}
                 setSelectedMcp={(name) => connectionsStore.setSelectedMcp(name)}
-                quickConnect={extensionItems.quickConnectEntries}
+                quickConnect={extensionItems.installedMcpEntries}
                 enablementContext={enablementContext}
                 builtInExtensionsDisabled={builtInExtensionsDisabled}
                 connectMcp={(entry) => {
@@ -2281,7 +2274,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       case "cloud-workers":
         return (
           <CloudWorkersView
-            connectRemoteWorkspace={async () => false}
+            connectRemoteWorkspace={handleCreateRemoteWorkspace}
             onOpenAccount={openCloudAccountSettings}
           />
         );

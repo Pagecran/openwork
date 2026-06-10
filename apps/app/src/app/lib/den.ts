@@ -119,6 +119,15 @@ export type DenMcpToken = {
   resource: string;
 };
 
+export type DenStaticWorkerAttachInput = {
+  name: string;
+  description?: string | null;
+  url: string;
+  clientToken: string;
+  hostToken: string;
+  activityToken?: string | null;
+};
+
 export type DenOrgLlmProviderModel = {
   id: string;
   name: string;
@@ -129,10 +138,13 @@ export type DenOrgLlmProviderModel = {
 export type DenOrgLlmProvider = {
   id: string;
   source: "models_dev" | "custom" | "openwork";
+  credentialKind: "api_key" | "opencode_oauth";
   providerId: string;
   name: string;
   providerConfig: Record<string, unknown>;
   hasApiKey: boolean;
+  hasOpencodeAuth: boolean;
+  hasCredential: boolean;
   models: DenOrgLlmProviderModel[];
   createdAt: string | null;
   updatedAt: string | null;
@@ -140,6 +152,15 @@ export type DenOrgLlmProvider = {
 
 export type DenOrgLlmProviderConnection = DenOrgLlmProvider & {
   apiKey: string | null;
+  opencodeAuth: string | null;
+};
+
+export type DenManagedProviderSyncResult = {
+  status: "applied" | "failed";
+  providerCount: number;
+  revision: string;
+  providerIds?: string[];
+  reason?: string;
 };
 
 export type DenPluginConfigObjectType = "skill" | "agent" | "command" | "tool" | "mcp" | "hook" | "context" | "custom";
@@ -590,8 +611,20 @@ function syncBootstrapSettingsToLocalStorage(config: DenBootstrapConfig) {
     return;
   }
 
+  const previousBaseUrl = window.localStorage.getItem(STORAGE_BASE_URL);
+  const previousOrigin = normalizeDenBaseUrl(previousBaseUrl) ?? "";
+  const nextOrigin = normalizeDenBaseUrl(config.baseUrl) ?? "";
+  const denOriginChanged = Boolean(previousOrigin && nextOrigin && previousOrigin !== nextOrigin);
+
   window.localStorage.setItem(STORAGE_BASE_URL, config.baseUrl);
   window.localStorage.setItem(STORAGE_API_BASE_URL, config.apiBaseUrl);
+
+  if (denOriginChanged) {
+    window.localStorage.removeItem(STORAGE_AUTH_TOKEN);
+    window.localStorage.removeItem(STORAGE_ACTIVE_ORG_ID);
+    window.localStorage.removeItem(STORAGE_ACTIVE_ORG_SLUG);
+    window.localStorage.removeItem(STORAGE_ACTIVE_ORG_NAME);
+  }
 }
 
 function getPendingBootstrapConfig(next: DenSettings): DenBootstrapConfig | null {
@@ -626,50 +659,17 @@ export async function initializeDenBootstrapConfig(): Promise<DenBootstrapConfig
     return desktopBootstrapConfig;
   }
 
-  // The shell IPC bridge can be momentarily unavailable at first paint;
-  // retry briefly before giving up so a boot race does not poison the
-  // session with build defaults.
-  const SHELL_BOOTSTRAP_ATTEMPTS = 3;
-  const SHELL_BOOTSTRAP_RETRY_DELAY_MS = 350;
-  for (let attempt = 1; attempt <= SHELL_BOOTSTRAP_ATTEMPTS; attempt += 1) {
-    try {
-      const bootstrap = await getDesktopBootstrapConfigFromShell() as ShellDesktopBootstrapConfig;
-      applyDesktopBootstrapConfig(resolveDenBootstrapConfig(bootstrap));
-      return desktopBootstrapConfig;
-    } catch (error) {
-      console.error("[den-bootstrap] shell read failed", attempt, error);
-      if (attempt < SHELL_BOOTSTRAP_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, SHELL_BOOTSTRAP_RETRY_DELAY_MS));
-      }
-    }
+  try {
+    const bootstrap = await getDesktopBootstrapConfigFromShell() as ShellDesktopBootstrapConfig;
+    applyDesktopBootstrapConfig(resolveDenBootstrapConfig(bootstrap));
+  } catch {
+    desktopBootstrapConfig = resolveDenBootstrapConfig({
+      baseUrl: BUILD_DEN_BASE_URL,
+      apiBaseUrl: BUILD_DEN_API_BASE_URL,
+      requireSignin: BUILD_DEN_REQUIRE_SIGNIN,
+    });
+    syncBootstrapSettingsToLocalStorage(desktopBootstrapConfig);
   }
-
-  // All quick attempts failed. Keep build defaults in memory only — do NOT
-  // sync them to localStorage: previously synced values from a successful
-  // boot are more trustworthy than build defaults, and clobbering them
-  // silently reverted custom/self-hosted control planes to the production
-  // URL until a manual reload.
-  desktopBootstrapConfig = resolveDenBootstrapConfig({
-    baseUrl: BUILD_DEN_BASE_URL,
-    apiBaseUrl: BUILD_DEN_API_BASE_URL,
-    requireSignin: BUILD_DEN_REQUIRE_SIGNIN,
-  });
-
-  // Heal in the background without blocking boot: once the bridge comes up,
-  // apply the real shell config and notify listeners.
-  void (async () => {
-    for (let attempt = 0; attempt < 15; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
-      try {
-        const bootstrap = await getDesktopBootstrapConfigFromShell() as ShellDesktopBootstrapConfig;
-        applyDesktopBootstrapConfig(resolveDenBootstrapConfig(bootstrap));
-        dispatchDenSettingsChanged({ settings: readDenSettings() });
-        return;
-      } catch {
-        // Bridge still unavailable — keep trying.
-      }
-    }
-  })();
 
   return desktopBootstrapConfig;
 }
@@ -1110,10 +1110,13 @@ function parseDenOrgLlmProvider(value: unknown): DenOrgLlmProvider | null {
   return {
     id: value.id,
     source: value.source,
+    credentialKind: value.credentialKind === "opencode_oauth" ? "opencode_oauth" : "api_key",
     providerId: value.providerId,
     name: value.name,
     providerConfig: parseJsonRecord(value.providerConfig),
     hasApiKey: value.hasApiKey === true,
+    hasOpencodeAuth: value.hasOpencodeAuth === true,
+    hasCredential: value.hasCredential === true || value.hasApiKey === true || value.hasOpencodeAuth === true,
     models: Array.isArray(value.models)
       ? value.models.flatMap((model) => {
           const parsed = parseDenOrgLlmProviderModel(model);
@@ -1149,6 +1152,28 @@ function getDenOrgLlmProviderConnection(payload: unknown): DenOrgLlmProviderConn
   return {
     ...provider,
     apiKey: typeof payload.llmProvider.apiKey === "string" ? payload.llmProvider.apiKey : null,
+    opencodeAuth: typeof payload.llmProvider.opencodeAuth === "string" ? payload.llmProvider.opencodeAuth : null,
+  };
+}
+
+function getDenManagedProviderSyncResult(payload: unknown): DenManagedProviderSyncResult | null {
+  if (!isRecord(payload)) return null;
+  if (payload.status !== "applied" && payload.status !== "failed") return null;
+  if (typeof payload.providerCount !== "number" || !Number.isInteger(payload.providerCount) || payload.providerCount < 0) return null;
+  if (typeof payload.revision !== "string") return null;
+  const rawProviderIds = Array.isArray(payload.providerIds)
+    ? payload.providerIds
+    : Array.isArray(payload.appliedProviderIds)
+      ? payload.appliedProviderIds
+      : undefined;
+  const providerIds = rawProviderIds ? readStringArray(rawProviderIds) : undefined;
+  if (rawProviderIds && providerIds?.length !== payload.providerCount) return null;
+  return {
+    status: payload.status,
+    providerCount: payload.providerCount,
+    revision: payload.revision,
+    ...(providerIds ? { providerIds } : {}),
+    ...(typeof payload.reason === "string" ? { reason: payload.reason } : {}),
   };
 }
 
@@ -1914,6 +1939,32 @@ export function createDenClient(options: { baseUrl: string; apiBaseUrl?: string 
       return tokens;
     },
 
+    async attachStaticWorker(orgId: string, input: DenStaticWorkerAttachInput): Promise<DenWorkerSummary> {
+      const payload = await requestJson<unknown>(baseUrls, "/v1/workers/static-attach", {
+        method: "POST",
+        token,
+        organizationId: orgId,
+        body: {
+          name: input.name,
+          description: input.description ?? undefined,
+          url: input.url,
+          clientToken: input.clientToken,
+          hostToken: input.hostToken,
+          activityToken: input.activityToken ?? undefined,
+        },
+      });
+      const workers = getWorkers({
+        workers: isRecord(payload) && isRecord(payload.worker)
+          ? [{ ...payload.worker, instance: isRecord(payload.instance) ? payload.instance : null }]
+          : [],
+      });
+      const worker = workers[0];
+      if (!worker) {
+        throw new DenApiError(500, "invalid_worker_attach_payload", "Static worker attach response was missing worker details.");
+      }
+      return worker;
+    },
+
     async listOrgSkills(orgId: string): Promise<DenOrgSkillCard[]> {
       const payload = await requestJson<unknown>(baseUrls, "/v1/skills", {
         method: "GET",
@@ -1987,7 +2038,7 @@ export function createDenClient(options: { baseUrl: string; apiBaseUrl?: string 
     async getOrgLlmProviderConnection(orgId: string, llmProviderId: string): Promise<DenOrgLlmProviderConnection> {
       const payload = await requestJson<unknown>(
         baseUrls,
-        `/v1/llm-providers/${encodeURIComponent(llmProviderId)}/connect`,
+        `/v1/llm-providers/${encodeURIComponent(llmProviderId)}/import-credential`,
         {
           method: "GET",
           token,
@@ -1999,6 +2050,27 @@ export function createDenClient(options: { baseUrl: string; apiBaseUrl?: string 
         throw new DenApiError(500, "invalid_llm_provider_payload", "LLM provider response was missing connection details.");
       }
       return provider;
+    },
+
+    async syncWorkerManagedProviders(orgId: string, workerId: string): Promise<DenManagedProviderSyncResult> {
+      const payload = await requestJson<unknown>(
+        baseUrls,
+        `/v1/workers/${encodeURIComponent(workerId)}/managed-providers/sync`,
+        {
+          method: "POST",
+          token,
+          organizationId: orgId,
+          body: {},
+        },
+      );
+      const result = getDenManagedProviderSyncResult(payload);
+      if (!result) {
+        throw new DenApiError(500, "invalid_managed_provider_sync_payload", "Managed provider sync response was invalid.");
+      }
+      if (result.status !== "applied") {
+        throw new DenApiError(502, "managed_provider_sync_failed", result.reason ?? "Managed provider sync failed.");
+      }
+      return result;
     },
 
     async listOrgMarketplaces(orgId: string): Promise<DenOrgMarketplace[]> {
