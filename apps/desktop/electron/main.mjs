@@ -1732,7 +1732,7 @@ async function fetchOpenworkWorkspaceList(hostUrl, token, hostToken) {
   if (hostAuthToken) headers.set("X-OpenWork-Host-Token", hostAuthToken);
 
   try {
-    const response = await fetch(url, { headers, signal: controller.signal });
+    const response = await fetch(url, { headers, redirect: "manual", signal: controller.signal });
     if (!response.ok) {
       throw new Error(`OpenWork workspace discovery failed (${response.status} ${response.statusText || "HTTP error"})`);
     }
