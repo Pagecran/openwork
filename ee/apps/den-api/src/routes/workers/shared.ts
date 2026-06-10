@@ -76,8 +76,7 @@ export const workerIdParamSchema = z.object({
   id: denTypeIdSchema("worker"),
 })
 
-export type WorkerRouteVariables = AuthContextVariables & Partial<UserOrganizationsContext>
-  & Partial<OrganizationContextVariables>
+export type WorkerRouteVariables = AuthContextVariables & Partial<UserOrganizationsContext> & Partial<OrganizationContextVariables>
 
 type WorkerRow = typeof WorkerTable.$inferSelect
 type WorkerInstanceRow = typeof WorkerInstanceTable.$inferSelect
@@ -483,7 +482,16 @@ async function resolveConnectUrlFromCandidates(workerId: WorkerId, instanceUrl: 
 }
 
 async function getWorkerRuntimeAccess(workerId: WorkerId) {
-  const instance = await getLatestWorkerInstance(workerId)
+  const workerRows = await db
+    .select({ status: WorkerTable.status })
+    .from(WorkerTable)
+    .where(eq(WorkerTable.id, workerId))
+    .limit(1)
+  if (workerRows[0]?.status !== "healthy") {
+    return null
+  }
+
+  const instance = await getLatestHealthyWorkerInstance(workerId)
   const tokenRows = await db
     .select()
     .from(WorkerTokenTable)
@@ -573,6 +581,24 @@ export async function getLatestWorkerInstance(workerId: WorkerId) {
     .limit(1)
 
   return rows[0] ?? null
+}
+
+export async function getLatestHealthyWorkerInstance(workerId: WorkerId) {
+  const rows = await db
+    .select()
+    .from(WorkerInstanceTable)
+    .where(and(eq(WorkerInstanceTable.worker_id, workerId), eq(WorkerInstanceTable.status, "healthy")))
+    .orderBy(desc(WorkerInstanceTable.created_at))
+    .limit(1)
+
+  return rows[0] ?? null
+}
+
+export function isWorkerRuntimeSyncTarget(input: { workerStatus?: string | null; instanceStatus?: string | null; instanceUrl?: string | null; hostToken?: string | null }) {
+  return input.workerStatus === "healthy"
+    && input.instanceStatus === "healthy"
+    && Boolean(input.instanceUrl?.trim())
+    && Boolean(input.hostToken?.trim())
 }
 
 async function getUnavailableStaticWorkerUrls() {
