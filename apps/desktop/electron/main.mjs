@@ -27,6 +27,7 @@ import { exportWorkspaceConfig, importWorkspaceConfig } from "./workspace-archiv
 import { parseOpencodeConfig } from "./opencode-config-json.mjs";
 import {
   discoverOpenworkWorkspace,
+  isDesktopFetchAllowedForWorkspaces,
   openworkWorkspaceDisplayName,
 } from "./remote-workspace.mjs";
 import { desktopFetch } from "./desktop-fetch.mjs";
@@ -2972,6 +2973,16 @@ async function handleDesktopInvoke(event, command, ...args) {
       return undefined;
     }
     case "__fetch": {
+      const url = String(args[0] ?? "").trim();
+      if (!url) throw new Error("URL is required.");
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("Desktop fetch only supports HTTP(S) URLs.");
+      }
+      const state = await readWorkspaceState();
+      if (!isDesktopFetchAllowedForWorkspaces(parsed.toString(), state.workspaces)) {
+        throw new Error("Desktop fetch is limited to configured remote workspace origins.");
+      }
       return desktopFetch(args[0], args[1]);
     }
     case "__homeDir":
