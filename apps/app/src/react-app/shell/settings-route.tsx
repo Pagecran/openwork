@@ -97,7 +97,6 @@ import { useCheckDesktopRestriction, useDesktopConfig } from "@/react-app/domain
 import { useRestrictionNotice } from "@/react-app/domains/cloud/restriction-notice-provider";
 import { useCloudProviderAutoSync } from "@/react-app/domains/cloud/use-cloud-provider-auto-sync";
 import {
-  hasOpenWorkModelsProvider,
   hideOpenWorkModelsPromo,
   isOpenWorkModelsPromoHidden,
   openWorkModelsPromoChangedEvent,
@@ -132,6 +131,7 @@ import { abortSessionSafe } from "@/app/lib/opencode-session";
 import { useReloadCoordinator } from "./reload-coordinator";
 import { buildFeedbackUrl } from "@/app/lib/feedback";
 import { getDenInferenceUrl } from "@/app/lib/den";
+import { buildCloudManagedModelIdsByProvider, buildCloudManagedModelOptions } from "@/app/cloud/managed-provider-models";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "./session-memory";
 import { workspaceSessionRoute, workspaceSettingsRoute } from "./workspace-routes";
 import { getReactQueryClient } from "@/react-app/infra/query-client";
@@ -820,25 +820,12 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
       Object.values(providerAuthSnapshot.importedCloudProviders ?? {}).some(isOpenWorkCloudProvider),
     [providerAuthSnapshot.cloudOrgProviders, providerAuthSnapshot.importedCloudProviders],
   );
-  const cloudManagedModelIdsByProvider = useMemo(() => {
-    const next = new Map<string, Set<string>>();
-    for (const imported of Object.values(providerAuthSnapshot.importedCloudProviders ?? {})) {
-      const providerId = imported.providerId?.trim();
-      if (!providerId) continue;
-      const modelIds = imported.modelIds
-        .map((id) => id.trim())
-        .filter(Boolean);
-      if (!modelIds.length) continue;
-      next.set(providerId, new Set(modelIds));
-    }
-    return next;
-  }, [providerAuthSnapshot.importedCloudProviders]);
+  const cloudManagedModelIdsByProvider = useMemo(
+    () => buildCloudManagedModelIdsByProvider(providerAuthSnapshot.importedCloudProviders),
+    [providerAuthSnapshot.importedCloudProviders],
+  );
   const [openWorkModelsPromoHidden, setOpenWorkModelsPromoHidden] = useState(isOpenWorkModelsPromoHidden);
-  const openWorkModelsConnected =
-    (cloudSession.isSignedIn && hasOpenWorkCloudProvider) ||
-    hasOpenWorkModelsProvider(providerConnectedIds);
-  const showOpenWorkModelsSubscribe = !openWorkModelsConnected && !openWorkModelsPromoHidden;
-  const showOpenWorkModelsConnect = !openWorkModelsConnected && openWorkModelsPromoHidden;
+  const showOpenWorkModelsSubscribe = (!cloudSession.isSignedIn || !hasOpenWorkCloudProvider) && !openWorkModelsPromoHidden;
 
   useEffect(() => {
     const handlePromoChanged = () => setOpenWorkModelsPromoHidden(isOpenWorkModelsPromoHidden());
@@ -1229,30 +1216,11 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
         } catch {
           seenIds = new Set();
         }
-        const options: ModelOption[] = [];
-        for (const provider of getConnectedProviderItems(data)) {
-          const modelIds = Object.keys(provider.models);
-          const isNew = !seenIds.has(provider.id);
-          const cloudManagedModelIds = cloudManagedModelIdsByProvider.get(provider.id);
-          for (const id of modelIds) {
-            if (cloudManagedModelIds && !cloudManagedModelIds.has(id)) continue;
-            const model = provider.models[id];
-            options.push({
-              providerID: provider.id,
-              modelID: id,
-              title: model.name || id,
-              description: provider.name,
-              behaviorTitle: "Reasoning",
-              behaviorLabel: "Default",
-              behaviorDescription: "",
-              behaviorValue: null,
-              isFree: false,
-              isConnected: true,
-              isRecommended: isNew,
-              source: cloudManagedModelIds || /^lpr_/i.test(provider.id) ? "cloud" as const : undefined,
-            });
-          }
-        }
+        const options = buildCloudManagedModelOptions({
+          providers: getConnectedProviderItems(data),
+          cloudManagedModelIdsByProvider,
+          isRecommendedProvider: (providerId) => !seenIds.has(providerId),
+        });
         setModelOptions(options);
       } catch (error) {
         toast.error(
@@ -1620,10 +1588,6 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   // signed in (dev #1509 "auto-sync cloud providers"). Mounted here because
   // the settings route owns the provider-auth store.
   useCloudProviderAutoSync(providerAuthStore.runCloudProviderSync);
-
-  // Keep the Den cloud MCP configured with a fresh first-party token while
-  // signed in: connects on sign-in, re-mints on org switch and before expiry.
-  useCloudProviderAutoSync(() => connectionsStore.syncCloudControlMcp());
 
   useEffect(() => {
     if (route.tab !== "cloud-providers") return;
@@ -2150,7 +2114,6 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
               Object.values(providerAuthSnapshot.importedCloudProviders ?? {}).map((p) => p.providerId)
             )}
             showOpenWorkModelsSubscribe={showOpenWorkModelsSubscribe}
-            showOpenWorkModelsConnect={showOpenWorkModelsConnect}
             onSubscribeOpenWorkModels={subscribeToOpenWorkModels}
             onDismissOpenWorkModels={dismissOpenWorkModelsPromo}
             cloudProvidersView={
@@ -2178,10 +2141,6 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
             autoCompactContext={autoCompactContext}
             autoCompactContextBusy={autoCompactContextBusy}
             onToggleAutoCompactContext={toggleAutoCompactContext}
-            analyticsEnabled={local.prefs.analyticsEnabled}
-            onToggleAnalytics={() => {
-              local.setPrefs((previous) => ({ ...previous, analyticsEnabled: !previous.analyticsEnabled }));
-            }}
           />
         );
       case "shell":
@@ -2237,7 +2196,7 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
                 mcpConnectingName={connectionsSnapshot.mcpConnectingName}
                 selectedMcp={connectionsSnapshot.selectedMcp}
                 setSelectedMcp={(name) => connectionsStore.setSelectedMcp(name)}
-                quickConnect={extensionItems.quickConnectEntries}
+                quickConnect={extensionItems.installedMcpEntries}
                 enablementContext={enablementContext}
                 builtInExtensionsDisabled={builtInExtensionsDisabled}
                 connectMcp={(entry) => {
