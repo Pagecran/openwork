@@ -17,7 +17,7 @@ import { z } from "zod"
 import { requireCloudWorkerAccess } from "../../billing/polar.js"
 import { db, dbClient } from "../../db.js"
 import { env } from "../../env.js"
-import type { OrganizationContextVariables, UserOrganizationsContext } from "../../middleware/index.js"
+import type { MemberTeamsContext, OrganizationContextVariables, UserOrganizationsContext } from "../../middleware/index.js"
 import { denTypeIdSchema } from "../../openapi.js"
 import { getOrganizationLimitStatus } from "../../organization-limits.js"
 import type { AuthContextVariables } from "../../session.js"
@@ -78,8 +78,7 @@ export const workerIdParamSchema = z.object({
   id: denTypeIdSchema("worker"),
 })
 
-export type WorkerRouteVariables = AuthContextVariables & Partial<UserOrganizationsContext>
-  & Partial<OrganizationContextVariables>
+export type WorkerRouteVariables = AuthContextVariables & Partial<UserOrganizationsContext> & Partial<OrganizationContextVariables> & Partial<MemberTeamsContext>
 
 type WorkerRow = typeof WorkerTable.$inferSelect
 type WorkerInstanceRow = typeof WorkerInstanceTable.$inferSelect
@@ -525,7 +524,7 @@ async function getWorkerRuntimeAccess(workerId: WorkerId) {
     return null
   }
 
-  const instance = await getLatestWorkerInstance(workerId)
+  const instance = await getLatestHealthyWorkerInstance(workerId)
   const tokenRows = await db
     .select()
     .from(WorkerTokenTable)
@@ -923,6 +922,24 @@ async function continueStaticCloudProvisioning(input: {
 }) {
   const reservation = await reserveStaticWorkerInstance({ workerId: input.workerId, orgId: input.orgId, staticLockHeld: input.staticLockHeld })
   await verifyReservedStaticWorker({ workerId: input.workerId, reservation })
+}
+
+export async function getLatestHealthyWorkerInstance(workerId: WorkerId) {
+  const rows = await db
+    .select()
+    .from(WorkerInstanceTable)
+    .where(and(eq(WorkerInstanceTable.worker_id, workerId), eq(WorkerInstanceTable.status, "healthy")))
+    .orderBy(desc(WorkerInstanceTable.created_at))
+    .limit(1)
+
+  return rows[0] ?? null
+}
+
+export function isWorkerRuntimeSyncTarget(input: { workerStatus?: string | null; instanceStatus?: string | null; instanceUrl?: string | null; hostToken?: string | null }) {
+  return input.workerStatus === "healthy"
+    && input.instanceStatus === "healthy"
+    && Boolean(input.instanceUrl?.trim())
+    && Boolean(input.hostToken?.trim())
 }
 
 export function toInstanceResponse(instance: WorkerInstanceRow | null) {

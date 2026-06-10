@@ -405,11 +405,8 @@ const requireEmailVerification = parsed.DEN_REQUIRE_EMAIL_VERIFICATION === undef
   ? !devMode
   : parsed.DEN_REQUIRE_EMAIL_VERIFICATION.trim().toLowerCase() !== "false"
 const port = Number(parsed.PORT ?? "8790")
-<<<<<<< HEAD
 const staticWorkers = parseStaticWorkersEnv(parsed)
 
-=======
->>>>>>> 47294a0b5 (feat(den): support Entra SSO auto-join)
 const daytonaSandboxPublic =
   (parsed.DAYTONA_SANDBOX_PUBLIC ?? "false").toLowerCase() === "true"
 
