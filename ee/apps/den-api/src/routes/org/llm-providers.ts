@@ -166,19 +166,6 @@ function createFailure(status: number, error: string, message?: string): RouteFa
   return { status, error, message }
 }
 
-function buildProviderAccessUserFallback(input: {
-  user: { id: string; name: string | null; email: string; image: string | null } | null
-  invitation: { email: string } | null
-}) {
-  const email = input.user?.email ?? input.invitation?.email ?? ""
-  return {
-    id: input.user?.id ?? null,
-    name: input.user?.name ?? email,
-    email,
-    image: input.user?.image ?? null,
-  }
-}
-
 function isRouteFailure(value: unknown): value is RouteFailure {
   return typeof value === "object" && value !== null && "status" in value && "error" in value
 }
@@ -356,6 +343,20 @@ export function redactLlmProviderCredentials<T extends { apiKey?: unknown; openc
     apiKey: undefined,
     opencodeAuth: undefined,
   }
+}
+
+export function serializeLlmProviderAccessUser(input: {
+  user: { id: string | null; name: string | null; email: string | null; image: string | null } | null
+  invitation: { email: string | null } | null
+}) {
+  return input.user?.id
+    ? input.user
+    : {
+        id: null,
+        name: null,
+        email: input.invitation?.email ?? null,
+        image: null,
+      }
 }
 
 function buildLlmProviderCredentialPayload(provider: LlmProviderRow) {
@@ -634,14 +635,14 @@ export async function loadLlmProviders(input: {
         role: MemberTable.role,
         removedAt: MemberTable.removedAt,
       },
+      invitation: {
+        email: InvitationTable.email,
+      },
       user: {
         id: AuthUserTable.id,
         name: AuthUserTable.name,
         email: AuthUserTable.email,
         image: AuthUserTable.image,
-      },
-      invitation: {
-        email: InvitationTable.email,
       },
     })
     .from(LlmProviderAccessTable)
@@ -722,7 +723,7 @@ export async function loadLlmProviders(input: {
         id: row.access.id,
         orgMembershipId: row.member.id,
         role: row.member.role,
-        user: buildProviderAccessUserFallback({ user: row.user, invitation: row.invitation }),
+        user: serializeLlmProviderAccessUser(row),
         createdAt: row.access.createdAt,
       })),
       teams: (teamAccessByProviderId.get(provider.id) ?? []).map((row) => ({
