@@ -1048,7 +1048,7 @@ export async function getWorkerTokensAndConnect(worker: WorkerRow) {
 export async function deleteWorkerCascade(worker: WorkerRow) {
   const instance = await getLatestWorkerInstance(worker.id)
 
-  if (worker.destination === "cloud") {
+  if (worker.destination === "cloud" && instance?.provider !== "static") {
     try {
       await deprovisionWorker({
         workerId: worker.id,
