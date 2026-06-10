@@ -97,7 +97,6 @@ function pickRemoteToken(workspace: WorkspaceEndpointInput): string {
   return (
     workspace.openworkClientToken ??
     workspace.openworkToken ??
-    workspace.openworkHostToken ??
     ""
   ).trim();
 }
