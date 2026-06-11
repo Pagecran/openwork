@@ -439,6 +439,7 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
     resolveUserOrganizationsMiddleware,
     paramValidator(workerIdParamSchema),
     async (c) => {
+    const user = c.get("user")
     const orgId = c.get("activeOrganizationId")
     const params = c.req.valid("param")
 
@@ -456,6 +457,13 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
     const worker = await getWorkerByIdForOrg(workerId, orgId)
     if (!worker) {
       return c.json({ error: "worker_not_found" }, 404)
+    }
+
+    if (worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can request worker tokens.",
+      }, 403)
     }
 
     const resolved = await getWorkerTokensAndConnect(worker)
