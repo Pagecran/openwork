@@ -938,6 +938,13 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
       return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can read static worker tokens." }, 403)
     }
 
+    if (instance?.provider !== "static" && worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can request worker tokens.",
+      }, 403)
+    }
+
     const resolved = await getWorkerTokensAndConnect(worker)
     if ("error" in resolved && resolved.error) {
       return new Response(JSON.stringify(resolved.error.body), {
