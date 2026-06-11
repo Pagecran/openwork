@@ -243,7 +243,6 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     activeWorker?.workerName ?? null,
     {
       clientToken: activeWorker?.clientToken ?? null,
-      hostToken: activeWorker?.hostToken ?? null,
       denBaseUrl: typeof window === "undefined" ? null : window.location.origin,
       denApiBaseUrl: typeof window === "undefined" ? null : `${window.location.origin}/api/den`,
     }
@@ -257,7 +256,6 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     {
       autoConnect: true,
       clientToken: activeWorker?.clientToken ?? null,
-      hostToken: activeWorker?.hostToken ?? null,
       denBaseUrl: typeof window === "undefined" ? null : window.location.origin,
       denApiBaseUrl: typeof window === "undefined" ? null : `${window.location.origin}/api/den`,
     }
