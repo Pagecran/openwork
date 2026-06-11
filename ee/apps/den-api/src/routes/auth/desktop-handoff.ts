@@ -85,7 +85,6 @@ function isWebAppHost(hostname: string) {
 
   return normalized === "app.openworklabs.com"
     || normalized === "app.openwork.software"
-    || normalized.startsWith("app.")
 }
 
 function configuredBrowserOrigins() {
