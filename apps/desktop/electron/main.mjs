@@ -51,6 +51,7 @@ const NATIVE_DEEP_LINK_EVENT = "openwork:deep-link-native";
 const NATIVE_MENU_OPEN_SETTINGS_EVENT = "openwork:native-menu:open-settings";
 const NATIVE_MENU_TOGGLE_SIDEBAR_EVENT = "openwork:native-menu:toggle-sidebar";
 const NATIVE_MENU_CHECK_UPDATES_EVENT = "openwork:native-menu:check-updates";
+const NATIVE_MENU_ZOOM_EVENT = "openwork:native-menu:zoom";
 const TAURI_APP_IDENTIFIER = "com.differentai.openwork";
 const DEV_APP_IDENTIFIER = "com.differentai.openwork.dev";
 const DESKTOP_PROTOCOL_SCHEME = "openwork";
@@ -525,8 +526,13 @@ const browserTabs = new Map();
 let browserTabOrder = [];
 let activeBrowserTabId = null;
 let browserViewVisible = false;
+// Last browser panel bounds reported by the renderer, in renderer CSS pixels.
+// Converted to window device-independent pixels at every setBounds call.
 let lastBrowserBounds = null;
 let browserTabCounter = 0;
+const BROWSER_SESSION_PARTITION = "persist:openwork-browser";
+// Active proxy for the built-in browser session: { rules, username, password }.
+let browserProxy = null;
 const BROWSER_DEFAULT_URL = "about:blank";
 // URL a user-initiated new tab (the "+" button / opening the browser panel)
 // lands on. The agent's programmatic path keeps BROWSER_DEFAULT_URL.
@@ -598,6 +604,15 @@ async function checkForUpdatesFromNativeMenu() {
 async function toggleSidebarFromNativeMenu() {
   const win = await createMainWindow();
   win.webContents.send(NATIVE_MENU_TOGGLE_SIDEBAR_EVENT);
+}
+
+// Zoom must flow through the renderer's font-zoom pathway so the persisted
+// preference and the applied webContents zoom factor never drift apart. The
+// built-in resetZoom/zoomIn/zoomOut roles bypass that pathway (and zoom
+// whichever webContents is focused, including the embedded browser view).
+async function zoomFromNativeMenu(action) {
+  const win = await createMainWindow();
+  win.webContents.send(NATIVE_MENU_ZOOM_EVENT, action);
 }
 
 function installApplicationMenu() {
@@ -705,9 +720,27 @@ function installApplicationMenu() {
         { role: "forceReload" },
         { role: "toggleDevTools" },
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        {
+          label: "Actual Size",
+          accelerator: "CommandOrControl+0",
+          click: () => {
+            void zoomFromNativeMenu("reset");
+          },
+        },
+        {
+          label: "Zoom In",
+          accelerator: "CommandOrControl+Plus",
+          click: () => {
+            void zoomFromNativeMenu("in");
+          },
+        },
+        {
+          label: "Zoom Out",
+          accelerator: "CommandOrControl+-",
+          click: () => {
+            void zoomFromNativeMenu("out");
+          },
+        },
         { type: "separator" },
         { role: "togglefullscreen" },
       ],
@@ -1058,7 +1091,7 @@ async function showBrowserTabContextMenu(tabId, point) {
 
   const showSerial = menuOverlayShowSerial + 1;
   menuOverlayShowSerial = showSerial;
-  const request = tabMenuRequest(tab, point);
+  const request = tabMenuRequest(tab, point ? scaleRendererPoint(point) : point);
   const view = await ensureMenuOverlayView();
   if (showSerial !== menuOverlayShowSerial || menuOverlayView !== view) return;
   menuOverlayRequest = request;
@@ -1100,6 +1133,70 @@ function handleMenuOverlayChoice(payload) {
   }
 }
 
+// ── Built-in browser proxy ──────────────────────────────────────────────
+// Proxying is session-scoped in Electron, and every built-in browser tab
+// shares BROWSER_SESSION_PARTITION, so one setProxy call covers all tabs
+// (agent CDP traffic included) without touching the rest of the app.
+
+function resolveBrowserProxyInput(input) {
+  const raw = String(input ?? "").trim();
+  const envMatch = raw.match(/^env:([A-Za-z0-9_]+)$/i);
+  if (!envMatch) return raw;
+  const key = `OPENWORK_BROWSER_PROXY_${envMatch[1].toUpperCase()}`;
+  const value = String(process.env[key] ?? "").trim();
+  if (!value) throw new Error(`No proxy configured: set the ${key} environment variable to a proxy URL.`);
+  return value;
+}
+
+function parseBrowserProxyInput(input) {
+  const raw = resolveBrowserProxyInput(input);
+  if (!raw) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+  let url;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    throw new Error(`Invalid proxy URL: ${raw}`);
+  }
+  if (!url.hostname || !url.port) {
+    throw new Error("Proxy must include host and port, e.g. http://user:pass@host:8080 or socks5://host:1080.");
+  }
+  const scheme = url.protocol.replace(/:$/, "").toLowerCase();
+  return {
+    rules: `${scheme}://${url.hostname}:${url.port}`,
+    username: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+  };
+}
+
+function browserProxyState() {
+  return {
+    proxy: browserProxy
+      ? { rules: browserProxy.rules, authenticated: Boolean(browserProxy.username) }
+      : null,
+  };
+}
+
+async function setBrowserProxy(proxyInput) {
+  const browserSession = session.fromPartition(BROWSER_SESSION_PARTITION);
+  const parsed = parseBrowserProxyInput(proxyInput);
+  if (parsed) {
+    await browserSession.setProxy({ proxyRules: parsed.rules, proxyBypassRules: "<local>" });
+  } else {
+    await browserSession.setProxy({ mode: "system" });
+  }
+  browserProxy = parsed;
+  // Drop keep-alive connections so existing tabs cannot bypass the new proxy.
+  await browserSession.closeAllConnections();
+  return browserProxyState();
+}
+
+app.on("login", (event, _webContents, _details, authInfo, callback) => {
+  if (!authInfo?.isProxy || !browserProxy?.username) return;
+  event.preventDefault();
+  callback(browserProxy.username, browserProxy.password);
+});
+
 function createBrowserTab(url = "about:blank", { select = true } = {}) {
   const tabId = createBrowserTabId();
   const view = new WebContentsView({
@@ -1109,7 +1206,7 @@ function createBrowserTab(url = "about:blank", { select = true } = {}) {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "browser-content-preload.cjs"),
-      partition: "persist:openwork-browser",
+      partition: BROWSER_SESSION_PARTITION,
     },
   });
   const tab = { tabId, view, favicon: null };
@@ -1178,6 +1275,37 @@ function detachBrowserView(view) {
   }
 }
 
+// The renderer reports bounds in CSS pixels, which Electron scales by the main
+// window's zoom factor. Read the factor from the webContents at apply time so
+// the conversion is always correct, no matter how the zoom was changed
+// (shortcuts, native menu, or Chromium's persisted per-origin zoom).
+function mainWindowZoomFactor() {
+  try {
+    const factor = mainWindow?.webContents.getZoomFactor();
+    return typeof factor === "number" && factor > 0 ? factor : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function scaleRendererBounds(bounds) {
+  const zoom = mainWindowZoomFactor();
+  // Round edges (not width/height) so the far edge has no sub-pixel seam.
+  const x = Math.round(bounds.x * zoom);
+  const y = Math.round(bounds.y * zoom);
+  return {
+    x,
+    y,
+    width: Math.round((bounds.x + bounds.width) * zoom) - x,
+    height: Math.round((bounds.y + bounds.height) * zoom) - y,
+  };
+}
+
+function scaleRendererPoint(point) {
+  const zoom = mainWindowZoomFactor();
+  return { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) };
+}
+
 function attachActiveBrowserView() {
   if (!mainWindow || !browserViewVisible) return;
   const view = getActiveBrowserView();
@@ -1189,7 +1317,7 @@ function attachActiveBrowserView() {
     mainWindow.contentView.addChildView(view);
   }
   if (lastBrowserBounds && lastBrowserBounds.width > 0 && lastBrowserBounds.height > 0) {
-    view.setBounds(lastBrowserBounds);
+    view.setBounds(scaleRendererBounds(lastBrowserBounds));
   }
 }
 
@@ -1291,7 +1419,7 @@ function attachBrowserView(bounds, { preloadDefault = false, ensureTab = false }
   const view = getActiveBrowserView();
   attachActiveBrowserView();
   if (bounds.width > 0 && bounds.height > 0) {
-    view?.setBounds(bounds);
+    view?.setBounds(scaleRendererBounds(bounds));
   }
   const url = view?.webContents.getURL();
   if (preloadDefault && (!url || url === "about:blank")) {
@@ -3414,7 +3542,7 @@ ipcMain.handle("openwork:browser:bounds", (_event, bounds) => {
   lastBrowserBounds = bounds;
   const view = getActiveBrowserView();
   if (view && browserViewVisible && bounds.width > 0 && bounds.height > 0) {
-    view.setBounds(bounds);
+    view.setBounds(scaleRendererBounds(bounds));
   }
 });
 ipcMain.handle("openwork:browser:state", () => browserStatePayload());
@@ -3428,6 +3556,8 @@ ipcMain.handle("openwork:browser:closeAllTabs", () => closeAllBrowserTabs());
 ipcMain.handle("openwork:browser:selectTab", (_event, tabId) => selectBrowserTab(String(tabId ?? "")).tabId);
 ipcMain.handle("openwork:browser:reorderTabs", (_event, tabIds) => reorderBrowserTabs(tabIds));
 ipcMain.handle("openwork:browser:listTabs", () => listBrowserTabs());
+ipcMain.handle("openwork:browser:setProxy", (_event, proxy) => setBrowserProxy(proxy));
+ipcMain.handle("openwork:browser:getProxy", () => browserProxyState());
 ipcMain.handle("openwork:browser:tabContextMenu", (_event, tabId, point) => showBrowserTabContextMenu(tabId, point));
 ipcMain.handle("openwork:browser:destroy", () => destroyBrowserView());
 ipcMain.on("openwork:menu-overlay:ready", (event) => {
