@@ -520,7 +520,7 @@ async function getWorkerRuntimeAccess(workerId: WorkerId) {
     .from(WorkerTable)
     .where(eq(WorkerTable.id, workerId))
     .limit(1)
-  if (workerRows[0]?.status !== "healthy") {
+  if (workerRows[0] && workerRows[0].status !== "healthy") {
     return null
   }
 
