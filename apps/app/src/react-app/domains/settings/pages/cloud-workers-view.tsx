@@ -87,7 +87,7 @@ export function CloudWorkersView({
       try {
         const tokens = await client.getWorkerTokens(workerId, activeOrgId);
         const openworkUrl = tokens.openworkUrl?.trim() ?? "";
-        const accessToken = tokens.clientToken?.trim() || tokens.ownerToken?.trim() || "";
+        const accessToken = tokens.clientToken?.trim() || "";
         if (!openworkUrl || !accessToken) {
           throw new Error(t("den.error_worker_not_ready"));
         }
