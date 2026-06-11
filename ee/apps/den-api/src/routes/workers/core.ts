@@ -933,13 +933,11 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
       return c.json({ error: "worker_not_found" }, 404)
     }
 
-    const instance = await getLatestWorkerInstance(worker.id)
-    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
-      worker,
-      userId: user.id,
-      currentMember: organizationContext?.currentMember,
-    })) {
-      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can read static worker tokens." }, 403)
+    if (worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can request worker tokens.",
+      }, 403)
     }
 
     const resolved = await getWorkerTokensAndConnect(worker)
@@ -995,13 +993,11 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
       return c.json({ error: "worker_not_found" }, 404)
     }
 
-    const instance = await getLatestWorkerInstance(worker.id)
-    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
-      worker,
-      userId: user.id,
-      currentMember: organizationContext?.currentMember,
-    })) {
-      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can delete static workers." }, 403)
+    if (worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can delete this worker.",
+      }, 403)
     }
 
     await deleteWorkerCascade(worker)

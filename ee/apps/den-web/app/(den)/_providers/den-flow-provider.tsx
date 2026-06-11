@@ -240,7 +240,12 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     openworkConnectUrl,
     preferredOpenworkToken,
     activeWorker?.workerId ?? null,
-    activeWorker?.workerName ?? null
+    activeWorker?.workerName ?? null,
+    {
+      clientToken: activeWorker?.clientToken ?? null,
+      denBaseUrl: typeof window === "undefined" ? null : window.location.origin,
+      denApiBaseUrl: typeof window === "undefined" ? null : `${window.location.origin}/api/den`,
+    }
   );
   const openworkAppConnectUrl = buildOpenworkAppConnectUrl(
     OPENWORK_APP_CONNECT_BASE_URL,
@@ -248,7 +253,12 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     preferredOpenworkToken,
     activeWorker?.workerId ?? null,
     activeWorker?.workerName ?? null,
-    { autoConnect: true }
+    {
+      autoConnect: true,
+      clientToken: activeWorker?.clientToken ?? null,
+      denBaseUrl: typeof window === "undefined" ? null : window.location.origin,
+      denApiBaseUrl: typeof window === "undefined" ? null : `${window.location.origin}/api/den`,
+    }
   );
   const ownedWorkerCount = workers.filter((item) => item.isMine).length;
   const additionalWorkerNeedsPlan = Boolean(

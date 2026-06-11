@@ -7,6 +7,7 @@ import { describeRoute } from "hono-openapi"
 import { z } from "zod"
 import { jsonValidator, requireUserMiddleware } from "../../middleware/index.js"
 import { db } from "../../db.js"
+import { env } from "../../env.js"
 import { denTypeIdSchema, invalidRequestSchema, jsonResponse, notFoundSchema, unauthorizedSchema } from "../../openapi.js"
 import type { AuthContextVariables } from "../../session.js"
 
@@ -38,6 +39,13 @@ const grantNotFoundSchema = z.object({
   error: z.literal("grant_not_found"),
   message: z.string(),
 }).meta({ ref: "DesktopHandoffGrantNotFoundError" })
+
+class DesktopHandoffBaseUrlError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "DesktopHandoffBaseUrlError"
+  }
+}
 
 function readSingleHeader(value: string | null) {
   const first = value?.split(",")[0]?.trim() ?? ""
@@ -77,7 +85,29 @@ function isWebAppHost(hostname: string) {
 
   return normalized === "app.openworklabs.com"
     || normalized === "app.openwork.software"
-    || normalized.startsWith("app.")
+}
+
+function configuredBrowserOrigins() {
+  const values = [env.betterAuthUrl, ...env.betterAuthTrustedOrigins]
+  return Array.from(new Set(values
+    .filter((value) => value && value !== "*")
+    .map((value) => {
+      try {
+        return new URL(value).origin.replace(/\/+$/, "")
+      } catch {
+        return null
+      }
+    })
+    .filter((value): value is string => Boolean(value))))
+}
+
+function isConfiguredBrowserOrigin(origin: string) {
+  try {
+    const normalized = new URL(origin).origin.replace(/\/+$/, "")
+    return configuredBrowserOrigins().includes(normalized)
+  } catch {
+    return false
+  }
 }
 
 function withDenProxyPath(origin: string) {
@@ -90,12 +120,15 @@ function withDenProxyPath(origin: string) {
   return url.toString().replace(/\/+$/, "")
 }
 
-function resolveDesktopDenBaseUrl(request: Request) {
+export function resolveDesktopDenBaseUrl(request: Request) {
   const originHeader = readSingleHeader(request.headers.get("origin"))
   if (originHeader) {
     try {
       const originUrl = new URL(originHeader)
-      if ((originUrl.protocol === "https:" || originUrl.protocol === "http:") && isWebAppHost(originUrl.hostname)) {
+      if (
+        (originUrl.protocol === "https:" || originUrl.protocol === "http:")
+        && (isWebAppHost(originUrl.hostname) || isConfiguredBrowserOrigin(originUrl.origin))
+      ) {
         return withDenProxyPath(originUrl.origin)
       }
     } catch {
@@ -109,20 +142,19 @@ function resolveDesktopDenBaseUrl(request: Request) {
   const protocol = forwardedProto ?? new URL(request.url).protocol.replace(/:$/, "")
   const targetHost = forwardedHost ?? host
   if (!targetHost) {
-    return "https://app.openworklabs.com/api/den"
+    throw new DesktopHandoffBaseUrlError("Desktop handoff requires a valid request host or forwarded host.")
   }
 
   const origin = `${protocol}://${targetHost}`
   try {
     const url = new URL(origin)
-    if (isWebAppHost(url.hostname)) {
+    if (isWebAppHost(url.hostname) || isConfiguredBrowserOrigin(url.origin)) {
       return withDenProxyPath(url.origin)
     }
+    throw new DesktopHandoffBaseUrlError("Desktop handoff could not resolve a trusted Den base URL from request configuration.")
   } catch {
-    // Ignore invalid forwarded origins.
+    throw new DesktopHandoffBaseUrlError("Desktop handoff could not resolve a trusted Den base URL from request configuration.")
   }
-
-  return origin
 }
 
 function buildOpenworkDeepLink(input: {
@@ -175,7 +207,15 @@ export function registerDesktopAuthRoutes<T extends { Variables: AuthContextVari
       consumed_at: null,
     })
 
-    const denBaseUrl = resolveDesktopDenBaseUrl(c.req.raw)
+    let denBaseUrl: string
+    try {
+      denBaseUrl = resolveDesktopDenBaseUrl(c.req.raw)
+    } catch (error) {
+      if (error instanceof DesktopHandoffBaseUrlError) {
+        return c.json({ error: "desktop_handoff_base_url_invalid", message: error.message }, 400)
+      }
+      throw error
+    }
 
     return c.json({
       grant,

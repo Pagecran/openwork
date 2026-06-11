@@ -113,13 +113,11 @@ export function registerWorkerRuntimeRoutes<T extends { Variables: WorkerRouteVa
       return c.json({ error: "worker_not_found" }, 404)
     }
 
-    const instance = await getLatestWorkerInstance(worker.id)
-    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
-      worker,
-      userId: user.id,
-      currentMember: organizationContext?.currentMember,
-    })) {
-      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can access static worker runtime operations." }, 403)
+    if (worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can upgrade this worker runtime.",
+      }, 403)
     }
 
     const runtime = await fetchWorkerRuntimeJson({
