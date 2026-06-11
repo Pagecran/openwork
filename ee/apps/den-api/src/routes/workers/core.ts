@@ -1007,6 +1007,13 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
       return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can delete static workers." }, 403)
     }
 
+    if (instance?.provider !== "static" && worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can delete this worker.",
+      }, 403)
+    }
+
     await deleteWorkerCascade(worker)
     return c.body(null, 204)
     },

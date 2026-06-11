@@ -122,6 +122,13 @@ export function registerWorkerRuntimeRoutes<T extends { Variables: WorkerRouteVa
       return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can access static worker runtime operations." }, 403)
     }
 
+    if (instance?.provider !== "static" && worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can upgrade this worker runtime.",
+      }, 403)
+    }
+
     const runtime = await fetchWorkerRuntimeJson({
       workerId: worker.id,
       path: "/runtime/upgrade",
