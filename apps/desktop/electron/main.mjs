@@ -1191,8 +1191,9 @@ async function setBrowserProxy(proxyInput) {
   return browserProxyState();
 }
 
-app.on("login", (event, _webContents, _details, authInfo, callback) => {
+app.on("login", (event, webContents, _details, authInfo, callback) => {
   if (!authInfo?.isProxy || !browserProxy?.username) return;
+  if (!webContents || webContents.session !== session.fromPartition(BROWSER_SESSION_PARTITION)) return;
   event.preventDefault();
   callback(browserProxy.username, browserProxy.password);
 });
