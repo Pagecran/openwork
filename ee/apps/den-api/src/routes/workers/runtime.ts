@@ -77,6 +77,7 @@ export function registerWorkerRuntimeRoutes<T extends { Variables: WorkerRouteVa
     paramValidator(workerIdParamSchema),
     jsonValidator(z.object({}).passthrough()),
     async (c) => {
+    const user = c.get("user")
     const orgId = c.get("activeOrganizationId")
     const params = c.req.valid("param")
     const body = c.req.valid("json")
@@ -95,6 +96,13 @@ export function registerWorkerRuntimeRoutes<T extends { Variables: WorkerRouteVa
     const worker = await getWorkerByIdForOrg(workerId, orgId)
     if (!worker) {
       return c.json({ error: "worker_not_found" }, 404)
+    }
+
+    if (worker.created_by_user_id !== user.id) {
+      return c.json({
+        error: "forbidden",
+        message: "Only the worker owner can upgrade this worker runtime.",
+      }, 403)
     }
 
     const runtime = await fetchWorkerRuntimeJson({
