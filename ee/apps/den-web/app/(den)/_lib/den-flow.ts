@@ -538,7 +538,7 @@ export function getWorkerTokens(payload: unknown): WorkerTokens | null {
   const openworkUrl = connect && typeof connect.openworkUrl === "string" ? connect.openworkUrl : null;
   const workspaceId = connect && typeof connect.workspaceId === "string" ? connect.workspaceId : null;
 
-  if (!clientToken && !ownerToken && !hostToken) {
+  if (!clientToken) {
     return null;
   }
 
