@@ -26,6 +26,8 @@ import { createRuntimeManager } from "./runtime.mjs";
 import { registerUpdaterIpc } from "./updater.mjs";
 import { exportWorkspaceConfig, importWorkspaceConfig } from "./workspace-archive.mjs";
 import {
+  isDesktopFetchAllowedForDenBootstrap,
+  isDesktopFetchAllowedForWorkspaces,
   openworkWorkspaceDisplayName,
   selectOpenworkWorkspaceForConnection,
 } from "./remote-workspace.mjs";
@@ -46,6 +48,7 @@ const APP_IDENTIFIER = isDevMode ? DEV_APP_IDENTIFIER : TAURI_APP_IDENTIFIER;
 const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/different-ai/openwork/releases/latest/download";
 const RELEASE_PAGE_URL = "https://github.com/different-ai/openwork/releases/latest";
 const DOCS_PAGE_URL = "https://openworklabs.com/docs";
+const PRODUCT_DESKTOP_FETCH_ORIGINS = new Set(["https://api.openai.com", "https://github.com"]);
 const COMPUTER_USE_HELPER_APP_NAME = "OpenWork Computer Use.app";
 const COMPUTER_USE_HELPER_EXECUTABLE = "ComputerUse";
 const terminalProcesses = new Map();
@@ -1743,7 +1746,7 @@ async function fetchOpenworkWorkspaceList(hostUrl, token, hostToken) {
   if (hostAuthToken) headers.set("X-OpenWork-Host-Token", hostAuthToken);
 
   try {
-    const response = await fetch(url, { headers, signal: controller.signal });
+    const response = await fetch(url, { headers, redirect: "manual", signal: controller.signal });
     if (!response.ok) {
       throw new Error(`OpenWork workspace discovery failed (${response.status} ${response.statusText || "HTTP error"})`);
     }
@@ -2867,11 +2870,27 @@ async function handleDesktopInvoke(event, command, ...args) {
       const url = String(args[0] ?? "").trim();
       const init = args[1] ?? {};
       if (!url) throw new Error("URL is required.");
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("Desktop fetch only supports HTTP(S) URLs.");
+      }
+      const state = await readWorkspaceState();
+      const bootstrap = await getDesktopBootstrapConfig();
+      if (!isDesktopFetchAllowedForWorkspaces(parsed.toString(), state.workspaces)
+        && !isDesktopFetchAllowedForDenBootstrap(parsed.toString(), bootstrap)
+        && !PRODUCT_DESKTOP_FETCH_ORIGINS.has(parsed.origin)) {
+        throw new Error("Desktop fetch is limited to configured remote workspace origins.");
+      }
       const timeoutMs = Number(init.timeoutMs);
+      const headers = init.headers && typeof init.headers === "object" ? init.headers : undefined;
+      const sensitiveHeaders = new Headers(headers);
+      const method = typeof init.method === "string" ? init.method : "GET";
+      const hasBody = typeof init.body === "string";
       const response = await fetch(url, {
-        method: typeof init.method === "string" ? init.method : undefined,
-        headers: init.headers && typeof init.headers === "object" ? init.headers : undefined,
-        body: typeof init.body === "string" ? init.body : undefined,
+        method,
+        redirect: sensitiveHeaders.has("authorization") || sensitiveHeaders.has("x-openwork-host-token") || hasBody || !["GET", "HEAD"].includes(method.toUpperCase()) ? "manual" : "follow",
+        headers,
+        body: hasBody ? init.body : undefined,
         signal: Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
       });
       return {

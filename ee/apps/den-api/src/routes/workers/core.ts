@@ -1,17 +1,24 @@
-import { desc, eq } from "@openwork-ee/den-db/drizzle"
-import { WorkerTable, WorkerTokenTable } from "@openwork-ee/den-db/schema"
+import { and, desc, eq, inArray } from "@openwork-ee/den-db/drizzle"
+import { WorkerInstanceTable, WorkerTable, WorkerTokenTable } from "@openwork-ee/den-db/schema"
 import { createDenTypeId, normalizeDenTypeId } from "@openwork-ee/utils/typeid"
 import type { Hono } from "hono"
+import type { MiddlewareHandler } from "hono"
 import { describeRoute } from "hono-openapi"
 import { z } from "zod"
 import { db } from "../../db.js"
-import { jsonValidator, paramValidator, queryValidator, requireUserMiddleware, resolveUserOrganizationsMiddleware } from "../../middleware/index.js"
+import { env } from "../../env.js"
+import { jsonValidator, paramValidator, queryValidator, requireUserMiddleware, resolveOrganizationContextMiddleware, resolveUserOrganizationsMiddleware } from "../../middleware/index.js"
 import { denTypeIdSchema, emptyResponse, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, unauthorizedSchema } from "../../openapi.js"
 import { getOrganizationLimitStatus } from "../../organization-limits.js"
 import { getRequiredUserEmail } from "../../user.js"
+import { fetchStaticHttpTarget } from "../../workers/static-fetch.js"
 import type { WorkerRouteVariables } from "./shared.js"
 import {
   continueCloudProvisioning,
+  attachStaticWorkerSchema,
+  canAttachStaticWorkerForMember,
+  canReadStaticWorkerTokensForMember,
+  cleanupStaleStaticReservations,
   createWorkerSchema,
   deleteWorkerCascade,
   getLatestWorkerInstance,
@@ -19,11 +26,18 @@ import {
   getWorkerTokensAndConnect,
   listWorkersQuerySchema,
   parseWorkerIdParam,
+  reserveStaticWorkerForCreatedWorker,
   requireCloudAccessOrPayment,
+  shouldUseSignupAutoExistingWorker,
   toInstanceResponse,
   toWorkerResponse,
   token,
   updateWorkerSchema,
+  type ValidatedStaticWorkerAttachUrl,
+  validateResolvedStaticWorkerAttachUrl,
+  verifyReservedStaticWorker,
+  withStaticAssignmentLock,
+  withStaticAssignmentMutex,
   workerIdParamSchema,
 } from "./shared.js"
 
@@ -79,6 +93,15 @@ const workerCreateResponseSchema = z.object({
   }),
 }).meta({ ref: "WorkerCreateResponse" })
 
+const staticWorkerAttachResponseSchema = z.object({
+  worker: workerSchema,
+  instance: workerInstanceSchema,
+  launch: z.object({
+    mode: z.literal("attached"),
+    pollAfterMs: z.literal(0),
+  }),
+}).meta({ ref: "StaticWorkerAttachResponse" })
+
 const workerTokensResponseSchema = z.object({
   tokens: z.object({
     owner: z.string(),
@@ -90,6 +113,8 @@ const workerTokensResponseSchema = z.object({
     workspaceId: z.string().nullable(),
   }).nullable(),
 }).meta({ ref: "WorkerTokensResponse" })
+
+type WorkerRow = typeof WorkerTable.$inferSelect
 
 const organizationUnavailableSchema = z.object({
   error: z.literal("organization_unavailable"),
@@ -123,6 +148,312 @@ const workerRuntimeUnavailableSchema = z.object({
   error: z.literal("worker_runtime_unavailable"),
   message: z.string(),
 })).meta({ ref: "WorkerConnectionError" })
+
+async function getExistingSignupAutoWorkerResponse(input: {
+  orgId: WorkerRow["org_id"]
+  userId: NonNullable<WorkerRow["created_by_user_id"]>
+}) {
+  const rows = await db
+    .select()
+    .from(WorkerTable)
+    .where(and(
+      eq(WorkerTable.org_id, input.orgId),
+      eq(WorkerTable.created_by_user_id, input.userId),
+      eq(WorkerTable.destination, "cloud"),
+      inArray(WorkerTable.status, ["provisioning", "healthy"]),
+    ))
+    .orderBy(desc(WorkerTable.created_at))
+    .limit(1)
+
+  const existingWorker = rows[0]
+  if (!existingWorker) {
+    return null
+  }
+
+  const instance = await getLatestWorkerInstance(existingWorker.id)
+  const tokensAndConnect = await getWorkerTokensAndConnect(existingWorker)
+  const tokens = "tokens" in tokensAndConnect ? tokensAndConnect.tokens : undefined
+  if (!tokens) {
+    return null
+  }
+
+  return {
+    worker: toWorkerResponse(existingWorker, input.userId),
+    tokens,
+    instance: toInstanceResponse(instance),
+    launch: { mode: "existing", pollAfterMs: 0 },
+  }
+}
+
+export async function fetchStaticWorker(url: string, path: string, headers: Record<string, string>) {
+  return fetch(`${url}${path}`, {
+    method: "GET",
+    redirect: "manual",
+    headers: { Accept: "application/json", ...headers },
+    signal: AbortSignal.timeout(env.staticWorkers.healthcheckTimeoutMs),
+  })
+}
+
+function formatIpForUrl(address: string) {
+  return address.includes(":") ? `[${address}]` : address
+}
+
+export async function fetchPinnedStaticWorker(target: ValidatedStaticWorkerAttachUrl, path: string, headers: Record<string, string>) {
+  const original = new URL(target.url)
+  const resolvedAddress = original.protocol === "http:" ? target.resolvedAddresses[0]?.address : undefined
+  const pinned = resolvedAddress ? new URL(target.url) : original
+  if (resolvedAddress) {
+    pinned.hostname = formatIpForUrl(resolvedAddress)
+  }
+  const hostHeader = original.port ? `${original.hostname}:${original.port}` : original.hostname
+  return fetchStaticHttpTarget(`${pinned.toString().replace(/\/+$/, "")}${path}`, {
+    method: "GET",
+    redirect: "manual",
+    headers: {
+      Accept: "application/json",
+      ...(resolvedAddress && original.protocol === "http:" ? { Host: hostHeader } : {}),
+      ...headers,
+    },
+    signal: AbortSignal.timeout(env.staticWorkers.healthcheckTimeoutMs),
+  })
+}
+
+export async function assertStaticWorkerReachable(url: string | ValidatedStaticWorkerAttachUrl, clientToken: string, hostToken: string) {
+  const fetchWorker = typeof url === "string"
+    ? (path: string, headers: Record<string, string>) => fetchStaticWorker(url, path, headers)
+    : (path: string, headers: Record<string, string>) => fetchPinnedStaticWorker(url, path, headers)
+
+  const clientResponse = await fetchWorker("/workspaces", {
+    Authorization: `Bearer ${clientToken}`,
+  })
+
+  if (!clientResponse.ok) {
+    throw new Error(`Worker rejected the provided client token with HTTP ${clientResponse.status}`)
+  }
+
+  const hostResponse = await fetchWorker("/env/keys", {
+    "X-OpenWork-Host-Token": hostToken,
+  })
+
+  if (!hostResponse.ok) {
+    throw new Error(`Worker rejected the provided host token with HTTP ${hostResponse.status}`)
+  }
+}
+
+type StaticAttachTx = Pick<typeof db, "insert" | "select">
+type StaticAttachInput = z.infer<typeof attachStaticWorkerSchema>
+type StaticAttachRouteDeps = {
+  middlewares?: MiddlewareHandler<{ Variables: WorkerRouteVariables }>[]
+  data?: StaticAttachTx
+  lookup?: Parameters<typeof validateResolvedStaticWorkerAttachUrl>[2]
+  fetchReachable?: (url: ValidatedStaticWorkerAttachUrl, clientToken: string, hostToken: string) => Promise<void>
+  lock?: <T>(run: (tx: StaticAttachTx) => Promise<T>) => Promise<T>
+  getWorkerLimit?: typeof getOrganizationLimitStatus
+}
+
+async function findActiveStaticWorkerByUrl(tx: Pick<typeof db, "select">, normalizedUrl: string) {
+  return tx
+    .select({ id: WorkerInstanceTable.id })
+    .from(WorkerInstanceTable)
+    .where(
+      and(
+        eq(WorkerInstanceTable.provider, "static"),
+        eq(WorkerInstanceTable.url, normalizedUrl),
+        inArray(WorkerInstanceTable.status, ["provisioning", "healthy"]),
+      ),
+    )
+    .limit(1)
+}
+
+function staticAttachDuplicateResponse() {
+  return {
+    error: "worker_url_already_attached",
+    message: "This static worker URL is already attached to an active Den worker.",
+  }
+}
+
+export function registerStaticWorkerAttachRoute(app: Hono<{ Variables: WorkerRouteVariables }>, deps: StaticAttachRouteDeps = {}) {
+  const routeMiddlewares = deps.middlewares ?? [requireUserMiddleware, resolveOrganizationContextMiddleware, jsonValidator(attachStaticWorkerSchema)]
+  const data = deps.data ?? db
+  const fetchReachable = deps.fetchReachable ?? assertStaticWorkerReachable
+  const lock = deps.lock ?? ((run) => withStaticAssignmentLock(run))
+  const getWorkerLimit = deps.getWorkerLimit ?? getOrganizationLimitStatus
+
+  app.post(
+    "/v1/workers/static-attach",
+    describeRoute({
+      tags: ["Workers"],
+      summary: "Attach static worker",
+      description: "Registers a pre-running LAN/OpenWork worker for the active organization using its existing runtime URL and tokens.",
+      responses: {
+        201: jsonResponse("Static worker attached successfully.", staticWorkerAttachResponseSchema),
+        400: jsonResponse("The static worker attach payload was invalid.", invalidRequestSchema),
+        401: jsonResponse("The caller must be signed in to attach workers.", unauthorizedSchema),
+        403: jsonResponse("Only organization owners and admins can attach static workers.", forbiddenSchema),
+        409: jsonResponse("The organization has reached its worker limit or the URL is already attached.", orgLimitReachedSchema.or(z.object({ error: z.literal("worker_url_already_attached"), message: z.string() }))),
+      },
+    }),
+    ...(routeMiddlewares as never[]),
+    async (c) => {
+    const user = c.get("user")
+    const orgId = c.get("activeOrganizationId")
+    const organizationContext = c.get("organizationContext")
+    const input = c.req.valid("json" as never) as StaticAttachInput
+
+    if (!user?.id) {
+      return c.json({ error: "unauthorized" }, 401)
+    }
+
+    if (!orgId) {
+      return c.json({ error: "organization_unavailable" }, 400)
+    }
+
+    const normalizedOrgId = normalizeDenTypeId("organization", orgId)
+    const normalizedUserId = normalizeDenTypeId("user", user.id)
+
+    if (!organizationContext || !canAttachStaticWorkerForMember(organizationContext)) {
+      return c.json({
+        error: "forbidden",
+        message: "Only organization owners and admins can attach static workers.",
+      }, 403)
+    }
+
+    const validatedUrl = await validateResolvedStaticWorkerAttachUrl(input.url, {
+      allowPrivate: env.staticWorkers.allowPrivateAttach,
+      allowedHosts: env.staticWorkers.attachAllowedHosts,
+      allowedCidrs: env.staticWorkers.attachAllowedCidrs,
+    }, deps.lookup)
+    if (!validatedUrl.ok) {
+      return c.json({ error: "invalid_request", message: validatedUrl.message }, 400)
+    }
+
+    const normalizedUrl = validatedUrl.url
+    await cleanupStaleStaticReservations()
+    const existing = await findActiveStaticWorkerByUrl(data, normalizedUrl)
+    if (existing.length > 0) {
+      return c.json(staticAttachDuplicateResponse(), 409)
+    }
+
+    try {
+      await fetchReachable(validatedUrl, input.clientToken.trim(), input.hostToken.trim())
+    } catch (error) {
+      return c.json({
+        error: "invalid_request",
+        message: "Static worker verification failed with the provided URL and tokens.",
+      }, 400)
+    }
+
+    const workerId = createDenTypeId("worker")
+    const instanceId = createDenTypeId("workerInstance")
+    const activityToken = input.activityToken?.trim() || token()
+    const now = new Date()
+
+    const insertResult = await lock(async (tx) => {
+      await cleanupStaleStaticReservations()
+      const duplicateRows = await findActiveStaticWorkerByUrl(tx, normalizedUrl)
+      if (duplicateRows.length > 0) {
+        return { status: "duplicate" as const }
+      }
+
+      const workerLimit = await getWorkerLimit(normalizedOrgId, "workers")
+      if (workerLimit.exceeded) {
+        return { status: "limit" as const, workerLimit }
+      }
+
+      await tx.insert(WorkerTable).values({
+        id: workerId,
+        org_id: normalizedOrgId,
+        created_by_user_id: normalizedUserId,
+        name: input.name,
+        description: input.description?.trim() || null,
+        destination: "cloud",
+        status: "healthy",
+        image_version: null,
+        workspace_path: null,
+        sandbox_backend: "static",
+      } as never)
+
+      await tx.insert(WorkerTokenTable).values([
+        {
+          id: createDenTypeId("workerToken"),
+          worker_id: workerId,
+          scope: "host",
+          token: input.hostToken.trim(),
+        },
+        {
+          id: createDenTypeId("workerToken"),
+          worker_id: workerId,
+          scope: "client",
+          token: input.clientToken.trim(),
+        },
+        {
+          id: createDenTypeId("workerToken"),
+          worker_id: workerId,
+          scope: "activity",
+          token: activityToken,
+        },
+      ] as never)
+
+      await tx.insert(WorkerInstanceTable).values({
+        id: instanceId,
+        worker_id: workerId,
+        provider: "static",
+        region: "on-prem",
+        url: normalizedUrl,
+        status: "healthy",
+      } as never)
+      return { status: "inserted" as const }
+    })
+
+    if (insertResult.status === "duplicate") {
+      return c.json(staticAttachDuplicateResponse(), 409)
+    }
+
+    if (insertResult.status === "limit") {
+      return c.json({
+        error: "org_limit_reached",
+        limitType: "workers",
+        limit: insertResult.workerLimit.limit,
+        currentCount: insertResult.workerLimit.currentCount,
+        message: `This workspace currently supports up to ${insertResult.workerLimit.limit} workers. Contact support to increase the limit.`,
+      }, 409)
+    }
+
+    return c.json({
+      worker: toWorkerResponse(
+        {
+          id: workerId,
+          org_id: normalizedOrgId,
+          created_by_user_id: normalizedUserId,
+          name: input.name,
+          description: input.description?.trim() || null,
+          destination: "cloud",
+          status: "healthy",
+          image_version: null,
+          workspace_path: null,
+          sandbox_backend: "static",
+          last_heartbeat_at: null,
+          last_active_at: null,
+          created_at: now,
+          updated_at: now,
+        },
+        normalizedUserId,
+      ),
+      instance: toInstanceResponse({
+        id: instanceId,
+        worker_id: workerId,
+        provider: "static",
+        region: "on-prem",
+        url: normalizedUrl,
+        status: "healthy",
+        created_at: now,
+        updated_at: now,
+      }),
+      launch: { mode: "attached", pollAfterMs: 0 },
+    }, 201)
+    },
+  )
+}
 
 export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVariables }>(app: Hono<T>) {
   app.get(
@@ -182,7 +513,7 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
         400: jsonResponse("The worker creation payload was invalid.", z.union([invalidRequestSchema, organizationUnavailableSchema, workspacePathRequiredSchema, userEmailRequiredSchema])),
         401: jsonResponse("The caller must be signed in to create workers.", unauthorizedSchema),
         402: jsonResponse("The caller needs an active cloud plan before launching a cloud worker.", paymentRequiredSchema),
-        409: jsonResponse("The organization has reached its worker limit.", orgLimitReachedSchema),
+        409: jsonResponse("The organization has reached its worker limit or static provisioning failed.", orgLimitReachedSchema.or(workerRuntimeUnavailableSchema)),
       },
     }),
     requireUserMiddleware,
@@ -195,6 +526,20 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
 
     if (!orgId) {
       return c.json({ error: "organization_unavailable" }, 400)
+    }
+
+    if (env.provisionerMode === "static") {
+      await withStaticAssignmentMutex(async () => cleanupStaleStaticReservations())
+    }
+
+    if (shouldUseSignupAutoExistingWorker(input)) {
+      const existingSignupAutoWorker = await getExistingSignupAutoWorkerResponse({
+        orgId,
+        userId: user.id,
+      })
+      if (existingSignupAutoWorker) {
+        return c.json(existingSignupAutoWorker, 202)
+      }
     }
 
     if (input.destination === "local" && !input.workspacePath) {
@@ -218,6 +563,101 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
           error: "cloud_worker_billing_unavailable",
           message: "Creating new cloud workers requires an existing OpenWork Cloud plan. New self-serve purchases are no longer available.",
         }, 402)
+      }
+
+      if (env.provisionerMode === "static") {
+        const prepared = await withStaticAssignmentMutex(async () => {
+          await cleanupStaleStaticReservations()
+          const workerLimit = await getOrganizationLimitStatus(orgId, "workers")
+          if (workerLimit.exceeded) {
+            return { response: c.json({
+              error: "org_limit_reached",
+              limitType: "workers",
+              limit: workerLimit.limit,
+              currentCount: workerLimit.currentCount,
+              message: `This workspace currently supports up to ${workerLimit.limit} workers. Contact support to increase the limit.`,
+            }, 409) }
+          }
+
+          const workerId = createDenTypeId("worker")
+          const hostToken = token()
+          const clientToken = token()
+          const activityToken = token()
+          const workerRow: WorkerRow = {
+            id: workerId,
+            org_id: orgId,
+            created_by_user_id: user.id,
+            name: input.name,
+            description: input.description ?? null,
+            destination: input.destination,
+            status: "provisioning",
+            image_version: input.imageVersion ?? null,
+            workspace_path: input.workspacePath ?? null,
+            sandbox_backend: input.sandboxBackend ?? null,
+            last_heartbeat_at: null,
+            last_active_at: null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          }
+
+          try {
+            await db.insert(WorkerTable).values({
+              id: workerId,
+              org_id: orgId,
+              created_by_user_id: user.id,
+              name: input.name,
+              description: input.description,
+              destination: input.destination,
+              status: "provisioning",
+              image_version: input.imageVersion,
+              workspace_path: input.workspacePath,
+              sandbox_backend: input.sandboxBackend,
+            })
+
+            await db.insert(WorkerTokenTable).values([
+              { id: createDenTypeId("workerToken"), worker_id: workerId, scope: "host", token: hostToken },
+              { id: createDenTypeId("workerToken"), worker_id: workerId, scope: "client", token: clientToken },
+              { id: createDenTypeId("workerToken"), worker_id: workerId, scope: "activity", token: activityToken },
+            ])
+
+            const reservation = await reserveStaticWorkerForCreatedWorker({ workerId, orgId })
+            return { workerId, workerRow, hostToken, clientToken, reservation }
+          } catch (error) {
+            await deleteWorkerCascade(workerRow)
+            throw error
+          }
+        })
+
+        if ("response" in prepared) {
+          return prepared.response
+        }
+
+        try {
+          await verifyReservedStaticWorker({ workerId: prepared.workerId, reservation: prepared.reservation })
+        } catch {
+          await deleteWorkerCascade(prepared.workerRow)
+          return c.json({
+            error: "worker_runtime_unavailable",
+            message: "Static worker provisioning failed. Check the static worker URL policy, health endpoint, and configured tokens.",
+          }, 409)
+        }
+
+        const latestWorkerRows = await db
+          .select()
+          .from(WorkerTable)
+          .where(eq(WorkerTable.id, prepared.workerId))
+          .limit(1)
+        const latestWorker = latestWorkerRows[0] ?? prepared.workerRow
+        const tokensAndConnect = await getWorkerTokensAndConnect(latestWorker)
+        const responseTokens = "tokens" in tokensAndConnect
+          ? tokensAndConnect.tokens
+          : { owner: prepared.hostToken, host: prepared.hostToken, client: prepared.clientToken }
+        return c.json({
+          worker: toWorkerResponse(latestWorker, user.id),
+          tokens: responseTokens,
+          instance: toInstanceResponse(await getLatestWorkerInstance(prepared.workerId)),
+          launch: { mode: "instant", pollAfterMs: 0 },
+        }, 201)
       }
 
       const workerLimit = await getOrganizationLimitStatus(orgId, "workers")
@@ -272,36 +712,66 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
       },
     ])
 
+    const workerRow: WorkerRow = {
+      id: workerId,
+      org_id: orgId,
+      created_by_user_id: user.id,
+      name: input.name,
+      description: input.description ?? null,
+      destination: input.destination,
+      status: workerStatus,
+      image_version: input.imageVersion ?? null,
+      workspace_path: input.workspacePath ?? null,
+      sandbox_backend: input.sandboxBackend ?? null,
+      last_heartbeat_at: null,
+      last_active_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    }
+
     if (input.destination === "cloud") {
-      void continueCloudProvisioning({
+      const provisioningInput = {
         workerId,
         name: input.name,
+        orgId,
         hostToken,
         clientToken,
         activityToken,
-      })
+      }
+
+      if (env.provisionerMode === "static") {
+        try {
+          await continueCloudProvisioning(provisioningInput)
+        } catch {
+          await deleteWorkerCascade(workerRow)
+          return c.json({
+            error: "worker_runtime_unavailable",
+            message: "Static worker provisioning failed. Check the static worker URL policy, health endpoint, and configured tokens.",
+          }, 409)
+        }
+        const latestWorkerRows = await db
+          .select()
+          .from(WorkerTable)
+          .where(eq(WorkerTable.id, workerId))
+          .limit(1)
+        const latestWorker = latestWorkerRows[0] ?? workerRow
+        const tokensAndConnect = await getWorkerTokensAndConnect(latestWorker)
+        const responseTokens = "tokens" in tokensAndConnect
+          ? tokensAndConnect.tokens
+          : { owner: hostToken, host: hostToken, client: clientToken }
+        return c.json({
+          worker: toWorkerResponse(latestWorker, user.id),
+          tokens: responseTokens,
+          instance: toInstanceResponse(await getLatestWorkerInstance(workerId)),
+          launch: { mode: "instant", pollAfterMs: 0 },
+        }, 201)
+      }
+
+      void continueCloudProvisioning(provisioningInput)
     }
 
     return c.json({
-      worker: toWorkerResponse(
-        {
-          id: workerId,
-          org_id: orgId,
-          created_by_user_id: user.id,
-          name: input.name,
-          description: input.description ?? null,
-          destination: input.destination,
-          status: workerStatus,
-          image_version: input.imageVersion ?? null,
-          workspace_path: input.workspacePath ?? null,
-          sandbox_backend: input.sandboxBackend ?? null,
-          last_heartbeat_at: null,
-          last_active_at: null,
-          created_at: new Date(),
-          updated_at: new Date(),
-        },
-        user.id,
-      ),
+      worker: toWorkerResponse(workerRow, user.id),
       tokens: {
         owner: hostToken,
         host: hostToken,
@@ -312,6 +782,8 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
     }, input.destination === "cloud" ? 202 : 201)
     },
   )
+
+  registerStaticWorkerAttachRoute(app as unknown as Hono<{ Variables: WorkerRouteVariables }>)
 
   app.get(
     "/v1/workers/:id",
@@ -431,15 +903,18 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
         200: jsonResponse("Worker connection tokens returned successfully.", workerTokensResponseSchema),
         400: jsonResponse("The worker token path parameters were invalid.", invalidRequestSchema),
         401: jsonResponse("The caller must be signed in to request worker tokens.", unauthorizedSchema),
+        403: jsonResponse("Only the worker creator, organization owners, and admins can read static worker tokens.", forbiddenSchema),
         404: jsonResponse("The worker could not be found.", notFoundSchema),
         409: jsonResponse("The worker is not ready to return connection tokens yet.", workerRuntimeUnavailableSchema),
       },
     }),
     requireUserMiddleware,
-    resolveUserOrganizationsMiddleware,
+    resolveOrganizationContextMiddleware,
     paramValidator(workerIdParamSchema),
     async (c) => {
+    const user = c.get("user")
     const orgId = c.get("activeOrganizationId")
+    const organizationContext = c.get("organizationContext")
     const params = c.req.valid("param")
 
     if (!orgId) {
@@ -456,6 +931,15 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
     const worker = await getWorkerByIdForOrg(workerId, orgId)
     if (!worker) {
       return c.json({ error: "worker_not_found" }, 404)
+    }
+
+    const instance = await getLatestWorkerInstance(worker.id)
+    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
+      worker,
+      userId: user.id,
+      currentMember: organizationContext?.currentMember,
+    })) {
+      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can read static worker tokens." }, 403)
     }
 
     const resolved = await getWorkerTokensAndConnect(worker)
@@ -482,14 +966,17 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
         204: emptyResponse("Worker deleted successfully."),
         400: jsonResponse("The worker deletion path parameters were invalid.", invalidRequestSchema),
         401: jsonResponse("The caller must be signed in to delete workers.", unauthorizedSchema),
+        403: jsonResponse("Only the worker creator, organization owners, and admins can delete static workers.", forbiddenSchema),
         404: jsonResponse("The worker could not be found.", notFoundSchema),
       },
     }),
     requireUserMiddleware,
-    resolveUserOrganizationsMiddleware,
+    resolveOrganizationContextMiddleware,
     paramValidator(workerIdParamSchema),
     async (c) => {
+    const user = c.get("user")
     const orgId = c.get("activeOrganizationId")
+    const organizationContext = c.get("organizationContext")
     const params = c.req.valid("param")
 
     if (!orgId) {
@@ -506,6 +993,15 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
     const worker = await getWorkerByIdForOrg(workerId, orgId)
     if (!worker) {
       return c.json({ error: "worker_not_found" }, 404)
+    }
+
+    const instance = await getLatestWorkerInstance(worker.id)
+    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
+      worker,
+      userId: user.id,
+      currentMember: organizationContext?.currentMember,
+    })) {
+      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can delete static workers." }, 403)
     }
 
     await deleteWorkerCascade(worker)
