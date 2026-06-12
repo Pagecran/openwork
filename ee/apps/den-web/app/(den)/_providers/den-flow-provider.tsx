@@ -1258,7 +1258,8 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
           headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
           body: JSON.stringify({
             name: resolvedLaunchName,
-            destination: "cloud"
+            destination: "cloud",
+            source: options.source ?? "manual"
           })
         },
         12000
