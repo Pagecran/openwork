@@ -1584,6 +1584,7 @@ export function SessionRoute() {
   const providerListQuery = useProviderListQuery({
     client: opencodeClient,
     baseUrl: opencodeBaseUrl,
+    openworkToken: selectedWorkspaceServerToken,
     directory: selectedWorkspaceRoot || undefined,
   });
   const selectedModelUnavailable = Boolean(
@@ -2905,6 +2906,7 @@ export function SessionRoute() {
     <WorkspaceProvider
       client={opencodeClient}
       opencodeBaseUrl={opencodeBaseUrl}
+      openworkToken={selectedWorkspaceServerToken}
       selectedWorkspaceRoot={selectedWorkspaceRoot}
       cloudManagedModelIdsByProvider={cloudManagedModelIdsByProvider}
     >

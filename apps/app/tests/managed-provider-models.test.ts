@@ -139,6 +139,33 @@ describe("managed cloud provider model allowlists", () => {
     }
   });
 
+  test("does not fallback to the full available catalog when configured providers are unavailable", async () => {
+    const requests: string[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url);
+        requests.push(url.pathname);
+        if (url.pathname === "/provider") {
+          return Response.json({
+            all: [provider("openai", "openAI_2", staleOpenAiModelIds())],
+            connected: ["openai", "opencode"],
+            default: {},
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+
+    try {
+      await expect(fetchProviderList({ client: createClient(server.url.toString()) })).rejects.toThrow();
+      expect(requests).toEqual(["/config/providers"]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test("keeps API-key NVIDIA managed provider selected IDs intact", () => {
     const allowlist = buildCloudManagedModelIdsByProvider({
       lpr_nvidia: importedProvider({

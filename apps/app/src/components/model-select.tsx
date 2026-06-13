@@ -56,12 +56,13 @@ function getProviderDisplayName(providerId: string) {
 }
 
 function useModelOptions(open: boolean) {
-  const { client, opencodeBaseUrl, selectedWorkspaceRoot, cloudManagedModelIdsByProvider } = useWorkspace();
+  const { client, opencodeBaseUrl, openworkToken, selectedWorkspaceRoot, cloudManagedModelIdsByProvider } = useWorkspace();
   const checkDesktopRestriction = useCheckDesktopRestriction();
 
   const { data, refetch } = useProviderListQuery({
     client,
     baseUrl: opencodeBaseUrl,
+    openworkToken,
     directory: selectedWorkspaceRoot,
     enabled: Boolean(client),
   });
