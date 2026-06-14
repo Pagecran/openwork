@@ -1428,7 +1428,7 @@ function createRoutes(
     buildCapabilities,
     fetchRuntimeControl,
     resolveWorkspace,
-    serializeWorkspace,
+    serializeWorkspace: serializeClientWorkspace,
     resolveToyUiEnabled,
     resolveDevLogPath,
     createOpenAiRealtimeVoiceSession,

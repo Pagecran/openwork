@@ -123,13 +123,12 @@ function openworkWorkspaceDisplayName(workspace: Record<string, unknown>): strin
     || null;
 }
 
-async function fetchOpenworkWorkspaceList(hostUrl: string, token: string, hostToken: string): Promise<unknown> {
+async function fetchOpenworkWorkspaceList(hostUrl: string, token: string): Promise<unknown> {
   const url = `${hostUrl.replace(/\/+$/, "")}/workspaces`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (hostToken) headers.set("X-OpenWork-Host-Token", hostToken);
 
   try {
     const response = await fetch(url, { headers, signal: controller.signal });
@@ -154,10 +153,9 @@ async function fetchOpenworkWorkspaceList(hostUrl: string, token: string, hostTo
 async function discoverOpenworkWorkspace(input: {
   hostUrl: string;
   token: string;
-  hostToken: string;
   directory: string | null;
 }): Promise<Record<string, unknown> | null> {
-  const list = await fetchOpenworkWorkspaceList(input.hostUrl, input.token, input.hostToken);
+  const list = await fetchOpenworkWorkspaceList(input.hostUrl, input.token);
   return selectOpenworkWorkspaceForConnection(list, input.directory);
 }
 
@@ -196,8 +194,14 @@ function serializeWorkspaceConfigEntry(workspace: WorkspaceInfo): Record<string,
     ...(workspace.displayName ? { displayName: workspace.displayName } : {}),
     ...(workspace.openworkHostUrl ? { openworkHostUrl: workspace.openworkHostUrl } : {}),
     ...(workspace.openworkToken ? { openworkToken: workspace.openworkToken } : {}),
+    ...(workspace.openworkClientToken ? { openworkClientToken: workspace.openworkClientToken } : {}),
+    ...(workspace.openworkHostToken ? { openworkHostToken: workspace.openworkHostToken } : {}),
     ...(workspace.openworkWorkspaceId ? { openworkWorkspaceId: workspace.openworkWorkspaceId } : {}),
     ...(workspace.openworkWorkspaceName ? { openworkWorkspaceName: workspace.openworkWorkspaceName } : {}),
+    ...(workspace.openworkDenBaseUrl ? { openworkDenBaseUrl: workspace.openworkDenBaseUrl } : {}),
+    ...(workspace.openworkDenApiBaseUrl ? { openworkDenApiBaseUrl: workspace.openworkDenApiBaseUrl } : {}),
+    ...(workspace.openworkDenOrgId ? { openworkDenOrgId: workspace.openworkDenOrgId } : {}),
+    ...(workspace.openworkDenWorkerId ? { openworkDenWorkerId: workspace.openworkDenWorkerId } : {}),
     ...(workspace.sandboxBackend ? { sandboxBackend: workspace.sandboxBackend } : {}),
     ...(workspace.sandboxRunId ? { sandboxRunId: workspace.sandboxRunId } : {}),
     ...(workspace.sandboxContainerName ? { sandboxContainerName: workspace.sandboxContainerName } : {}),
@@ -329,7 +333,12 @@ export function registerWorkspaceRoutes(options: RegisterWorkspaceRoutesOptions)
       ? stripOpenworkWorkspaceMount(rawOpenworkHostUrl ?? baseUrl)
       : rawOpenworkHostUrl;
     const openworkToken = readStringField(body, "openworkToken");
+    const openworkClientToken = readStringField(body, "openworkClientToken");
     const openworkHostToken = readStringField(body, "openworkHostToken");
+    const openworkDenBaseUrl = readStringField(body, "openworkDenBaseUrl");
+    const openworkDenApiBaseUrl = readStringField(body, "openworkDenApiBaseUrl");
+    const openworkDenOrgId = readStringField(body, "openworkDenOrgId");
+    const openworkDenWorkerId = readStringField(body, "openworkDenWorkerId");
     const sandboxBackend = readStringField(body, "sandboxBackend");
     const sandboxRunId = readStringField(body, "sandboxRunId");
     const sandboxContainerName = readStringField(body, "sandboxContainerName");
@@ -343,8 +352,7 @@ export function registerWorkspaceRoutes(options: RegisterWorkspaceRoutesOptions)
     if (remoteType === "openwork" && !openworkWorkspaceId) {
       const discovered = await discoverOpenworkWorkspace({
         hostUrl: openworkHostUrl ?? baseUrl,
-        token: openworkToken,
-        hostToken: openworkHostToken,
+        token: openworkClientToken || openworkToken,
         directory,
       });
       openworkWorkspaceId = discovered ? readStringField(discovered, "id") : "";
@@ -374,8 +382,14 @@ export function registerWorkspaceRoutes(options: RegisterWorkspaceRoutesOptions)
       ...(displayName ? { displayName } : {}),
       ...(remoteType === "openwork" && openworkHostUrl ? { openworkHostUrl } : {}),
       ...(openworkToken ? { openworkToken } : {}),
+      ...(openworkClientToken ? { openworkClientToken } : {}),
+      ...(openworkHostToken ? { openworkHostToken } : {}),
       ...(remoteType === "openwork" && openworkWorkspaceId ? { openworkWorkspaceId } : {}),
       ...(remoteType === "openwork" && openworkWorkspaceName ? { openworkWorkspaceName } : {}),
+      ...(openworkDenBaseUrl ? { openworkDenBaseUrl } : {}),
+      ...(openworkDenApiBaseUrl ? { openworkDenApiBaseUrl } : {}),
+      ...(openworkDenOrgId ? { openworkDenOrgId } : {}),
+      ...(openworkDenWorkerId ? { openworkDenWorkerId } : {}),
       ...(sandboxBackend ? { sandboxBackend } : {}),
       ...(sandboxRunId ? { sandboxRunId } : {}),
       ...(sandboxContainerName ? { sandboxContainerName } : {}),
