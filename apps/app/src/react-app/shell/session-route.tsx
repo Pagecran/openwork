@@ -146,6 +146,7 @@ import { useReactRenderWatchdog } from "./react-render-watchdog";
 
 import { readDenSettings } from "@/app/lib/den";
 import { denSessionUpdatedEvent } from "@/app/lib/den-session-events";
+import { buildCloudManagedModelIdsByProvider } from "@/app/cloud/managed-provider-models";
 
 import { filterProviderList } from "@/app/utils/providers";
 import { ensureDesktopLocalOpenworkConnection } from "./desktop-local-openwork";
@@ -481,7 +482,6 @@ export function SessionRoute() {
     onSaved: handleRemoteWorkspaceConnectionSaved,
   });
 
-
   const workspaceSessionGroups = useMemo(
     () => toSessionGroups(workspaces, sessionsByWorkspaceId, errorsByWorkspaceId, new Set(retryingWorkspaceIds)),
     [errorsByWorkspaceId, retryingWorkspaceIds, sessionsByWorkspaceId, workspaces],
@@ -542,10 +542,31 @@ export function SessionRoute() {
     return next;
   }, [errorsByWorkspaceId, workspaceConnectionOverrides, workspaces]);
 
+  const { store: sessionProviderAuthStore, snapshot: sessionProviderAuthSnapshot } =
+    useSessionProviderAuth({
+      opencodeClient,
+      providers,
+      providerDefaults,
+      providerConnectedIds,
+      disabledProviderIds,
+      selectedWorkspace,
+      selectedWorkspaceEndpoint,
+      selectedWorkspaceRoot,
+      selectedWorkspaceId,
+      setProviders,
+      setProviderDefaults,
+      setProviderConnectedIds,
+      setDisabledProviderIds,
+    });
+  const cloudManagedModelIdsByProvider = useMemo(
+    () => buildCloudManagedModelIdsByProvider(sessionProviderAuthSnapshot.importedCloudProviders),
+    [sessionProviderAuthSnapshot.importedCloudProviders],
+  );
   const mcpConnectedCount = useMcpConnectedCount(opencodeClient, selectedWorkspaceRoot);
   const providerListQuery = useProviderListQuery({
     client: opencodeClient,
     baseUrl: opencodeBaseUrl,
+    openworkToken: selectedWorkspaceServerToken,
     directory: selectedWorkspaceRoot || undefined,
   });
   const { providerCatalog, modelVariantLabel, modelBehaviorOptions, modelVariantValue } =
@@ -557,6 +578,8 @@ export function SessionRoute() {
   const modelPicker = useModelPicker({
     client: opencodeClient,
     baseUrl: opencodeBaseUrl,
+    openworkToken: selectedWorkspaceServerToken,
+    cloudManagedModelIdsByProvider,
     workspaceRoot: selectedWorkspaceRoot,
   });
   const selectedModelUnavailable = Boolean(
@@ -588,23 +611,6 @@ export function SessionRoute() {
     workspaceId: selectedWorkspaceId,
     providerConnectedIds,
   });
-
-  const { store: sessionProviderAuthStore, snapshot: sessionProviderAuthSnapshot } =
-    useSessionProviderAuth({
-      opencodeClient,
-      providers,
-      providerDefaults,
-      providerConnectedIds,
-      disabledProviderIds,
-      selectedWorkspace,
-      selectedWorkspaceEndpoint,
-      selectedWorkspaceRoot,
-      selectedWorkspaceId,
-      setProviders,
-      setProviderDefaults,
-      setProviderConnectedIds,
-      setDisabledProviderIds,
-    });
   const {
     activePermission,
     permissionReplyBusy,
@@ -675,6 +681,7 @@ export function SessionRoute() {
             await ensureProviderListQuery(getReactQueryClient(), {
               client: opencodeClient,
               baseUrl: opencodeBaseUrl,
+              openworkToken: selectedWorkspaceServerToken,
               directory: selectedWorkspaceRoot || undefined,
             }),
             disabledProviders,
@@ -691,7 +698,7 @@ export function SessionRoute() {
     return () => {
       cancelled = true;
     };
-  }, [opencodeBaseUrl, opencodeClient, selectedWorkspaceRoot, denSessionVersion]);
+  }, [opencodeBaseUrl, opencodeClient, selectedWorkspaceRoot, selectedWorkspaceServerToken, denSessionVersion]);
 
   const modelLabel = local.prefs.defaultModel
     ? resolveModelDisplayName(local.prefs.defaultModel.modelID)
@@ -1475,7 +1482,9 @@ export function SessionRoute() {
     <WorkspaceProvider
       client={opencodeClient}
       opencodeBaseUrl={opencodeBaseUrl}
+      openworkToken={selectedWorkspaceServerToken}
       selectedWorkspaceRoot={selectedWorkspaceRoot}
+      cloudManagedModelIdsByProvider={cloudManagedModelIdsByProvider}
     >
     {opencodeClient && selectedWorkspaceEndpoint && opencodeBaseUrl && selectedWorkspaceServerToken ? (
       <ReactSessionRuntime

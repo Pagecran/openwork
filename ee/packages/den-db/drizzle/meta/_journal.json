@@ -169,6 +169,13 @@
       "when": 1781307676381,
       "tag": "0024_violet_rawhide_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1777486400000,
+      "tag": "0025_llm_provider_opencode_oauth",
+      "breakpoints": true
     }
   ]
 }

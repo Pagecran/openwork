@@ -1,21 +1,17 @@
 "use client";
 
-import { useState } from "react";
 import {
   Bot,
   Box,
-  Check,
   ChevronDown,
   ChevronUp,
-  Copy,
   ExternalLink,
-  KeyRound,
   Monitor,
   MoreHorizontal,
-  RefreshCw,
   Search,
 } from "lucide-react";
 import { DenInput } from "../../_components/ui/input";
+import { DenButton } from "../../_components/ui/button";
 import { DashboardPageTemplate } from "../../_components/ui/dashboard-page-template";
 import {
   OPENWORK_APP_CONNECT_BASE_URL,
@@ -28,6 +24,7 @@ import {
   type WorkerListItem,
 } from "../../_lib/den-flow";
 import { useDenFlow } from "../../_providers/den-flow-provider";
+import { useOrgDashboard } from "../_providers/org-dashboard-provider";
 
 type ConnectionDetails = {
   openworkUrl: string | null;
@@ -50,84 +47,26 @@ function getStatusBadgeClass(bucket: ReturnType<typeof getWorkerStatusMeta>["buc
   }
 }
 
-function CredentialField({
-  id,
-  label,
-  value,
-  onCopy,
-  copied,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onCopy: (field: string, text: string) => void;
-  copied: boolean;
-}) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-[12px] text-gray-500">{label}</label>
-      <div className="flex items-center gap-2">
-        <input
-          readOnly
-          value={value}
-          className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] font-mono text-gray-600 outline-none shadow-sm transition-colors focus:border-gray-300"
-          onClick={(event) => event.currentTarget.select()}
-        />
-        <button
-          type="button"
-          onClick={() => onCopy(id, value)}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-400 shadow-sm transition-colors hover:border-gray-300 hover:text-gray-700"
-          aria-label={`Copy ${label}`}
-        >
-          {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function SandboxCard({
   sandbox,
   expanded,
   details,
-  connectBusy,
   renameBusy,
   onToggle,
-  onRefresh,
   onRename,
 }: {
   sandbox: WorkerListItem;
   expanded: boolean;
   details: ConnectionDetails | null;
-  connectBusy: boolean;
   renameBusy: boolean;
   onToggle: () => void;
-  onRefresh: () => void;
   onRename: () => void;
 }) {
-  const [showTokens, setShowTokens] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
   const meta = getWorkerStatusMeta(sandbox.status);
-  const canConnect = meta.bucket === "ready";
+  const canConnect = meta.bucket === "ready" && sandbox.isMine;
   const connectionUrl = details?.openworkUrl ?? sandbox.instanceUrl ?? null;
-  const ownerToken = details?.ownerToken ?? null;
-  const clientToken = details?.clientToken ?? null;
   const openWebUrl = details?.openworkAppConnectUrl ?? null;
   const openDesktopUrl = details?.openworkDeepLink ?? null;
-
-  async function handleCopy(field: string, text: string) {
-    await navigator.clipboard.writeText(text);
-    setCopiedField(field);
-    window.setTimeout(() => {
-      setCopiedField((current) => (current === field ? null : current));
-    }, 2000);
-  }
-
-  const credentialFields = [
-    connectionUrl ? { id: "url", label: "Connection URL", value: connectionUrl } : null,
-    ownerToken ? { id: "owner", label: "Owner token", value: ownerToken } : null,
-    clientToken ? { id: "client", label: "Client token", value: clientToken } : null,
-  ].filter((field): field is { id: string; label: string; value: string } => Boolean(field));
 
   return (
     <div className="rounded-2xl border border-gray-100 bg-white p-5 transition-all hover:border-gray-200 hover:shadow-[0_2px_8px_-4px_rgba(0,0,0,0.04)]">
@@ -154,13 +93,9 @@ function SandboxCard({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              if (expanded) {
-                setShowTokens(false);
-              }
-              onToggle();
-            }}
+            onClick={onToggle}
             disabled={!canConnect}
+            title={!sandbox.isMine ? "Only the worker owner can connect to this worker." : meta.bucket !== "ready" ? "This worker is not ready yet." : undefined}
             className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
               expanded
                 ? "bg-gray-100 text-gray-900 hover:bg-gray-200"
@@ -173,9 +108,10 @@ function SandboxCard({
           <button
             type="button"
             onClick={onRename}
-            disabled={renameBusy}
+            disabled={renameBusy || !sandbox.isMine}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
             aria-label={`Rename ${sandbox.workerName}`}
+            title={!sandbox.isMine ? "Only the worker owner can rename this worker." : undefined}
           >
             <MoreHorizontal size={16} />
           </button>
@@ -219,64 +155,12 @@ function SandboxCard({
           </div>
 
           {canConnect ? (
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => setShowTokens((current) => !current)}
-                className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50/50 px-4 py-2.5 text-[12px] font-medium text-gray-600 transition-colors hover:bg-gray-50"
-              >
-                <span className="flex items-center gap-2">
-                  <KeyRound size={14} className="text-gray-400" />
-                  Connection credentials
-                </span>
-                {showTokens ? (
-                  <ChevronUp size={14} className="text-gray-400" />
-                ) : (
-                  <ChevronDown size={14} className="text-gray-400" />
-                )}
-              </button>
-
-              {showTokens ? (
-                <div className="mt-2 space-y-4 rounded-xl border border-gray-100 bg-gray-50/50 p-5">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[10px] font-semibold uppercase tracking-[1px] text-gray-500">
-                      Access Tokens
-                    </span>
-                    <button
-                      type="button"
-                      onClick={onRefresh}
-                      disabled={connectBusy}
-                      className="flex items-center gap-1.5 text-[12px] font-medium text-gray-500 transition-colors hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <RefreshCw size={13} className={connectBusy ? "animate-spin" : ""} />
-                      {connectBusy ? "Refreshing..." : "Refresh tokens"}
-                    </button>
-                  </div>
-
-                  {credentialFields.length > 0 ? (
-                    credentialFields.map((field) => (
-                      <CredentialField
-                        key={field.id}
-                        id={field.id}
-                        label={field.label}
-                        value={field.value}
-                        onCopy={handleCopy}
-                        copied={copiedField === field.id}
-                      />
-                    ))
-                  ) : (
-                    <p className="text-[12px] text-gray-500">
-                      {connectBusy
-                        ? "Loading connection credentials..."
-                        : "Connection credentials will appear here once the workspace is ready."}
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </div>
+            <p className="mt-4 text-[12px] text-gray-500">
+              {connectionUrl ? "Connection is ready. Use the buttons above to open this worker." : "Connection details are still preparing."}
+            </p>
           ) : (
             <p className="mt-4 text-[12px] text-gray-500">
-              Connection details will appear once this workspace is ready.
+              {sandbox.isMine ? "Connection details will appear once this workspace is ready." : "Only the worker owner can connect to this worker."}
             </p>
           )}
         </div>
@@ -299,9 +183,14 @@ export function BackgroundAgentsScreen() {
     workersBusy,
     workersLoadedOnce,
     workersError,
+    launchBusy,
+    launchError,
+    launchStatus,
+    launchWorker,
     renameWorker,
     renameBusyWorkerId,
   } = useDenFlow();
+  const { orgId } = useOrgDashboard();
 
   async function loadConnectionDetails(workerId: string, workerName: string) {
     setConnectBusyWorkerId(workerId);
@@ -338,13 +227,25 @@ export function BackgroundAgentsScreen() {
           tokens.clientToken,
           workerId,
           workerName,
-          { autoConnect: true },
+          {
+            autoConnect: true,
+            clientToken: tokens.clientToken,
+            denBaseUrl: window.location.origin,
+            denApiBaseUrl: `${window.location.origin}/api/den`,
+            denOrgId: orgId,
+          },
         ),
         openworkDeepLink: buildOpenworkDeepLink(
           tokens.openworkUrl,
           tokens.clientToken,
           workerId,
           workerName,
+          {
+            clientToken: tokens.clientToken,
+            denBaseUrl: window.location.origin,
+            denApiBaseUrl: `${window.location.origin}/api/den`,
+            denOrgId: orgId,
+          },
         ),
       };
 
@@ -363,7 +264,7 @@ export function BackgroundAgentsScreen() {
 
   async function toggleSandbox(worker: WorkerListItem) {
     const meta = getWorkerStatusMeta(worker.status);
-    if (meta.bucket !== "ready") {
+    if (meta.bucket !== "ready" || !worker.isMine) {
       return;
     }
 
@@ -386,8 +287,20 @@ export function BackgroundAgentsScreen() {
       description="Run selected workflows in the background without asking each teammate to run them locally. Coming soon."
       colors={["#E9FFE0", "#3E9A1D", "#B3F750", "#51F0A3"]}
     >
-      <div className="mb-10 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-[13px] leading-6 text-amber-800">
-        New cloud workspaces are no longer available from this page. Existing workspaces remain available below.
+      <div className="mb-10 rounded-2xl border border-gray-100 bg-white p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-[16px] font-semibold text-gray-950">Shared workspace</h2>
+            <p className="mt-1 max-w-2xl text-[13px] leading-6 text-gray-500">
+              Launch an OpenWork workspace for this organization. In static mode, Den attaches the pre-provisioned worker from the configured pool.
+            </p>
+            {launchError ? <p className="mt-2 text-[13px] font-medium text-red-600">{launchError}</p> : null}
+            {!launchError && launchStatus ? <p className="mt-2 text-[13px] text-gray-500">{launchStatus}</p> : null}
+          </div>
+          <DenButton loading={launchBusy} onClick={() => void launchWorker({ source: "manual" })}>
+            Launch workspace
+          </DenButton>
+        </div>
       </div>
 
       {workersError ? (
@@ -435,10 +348,8 @@ export function BackgroundAgentsScreen() {
                 sandbox={sandbox}
                 expanded={expandedWorkerId === sandbox.workerId}
                 details={connectionDetailsByWorkerId[sandbox.workerId] ?? null}
-                connectBusy={connectBusyWorkerId === sandbox.workerId}
                 renameBusy={renameBusyWorkerId === sandbox.workerId}
                 onToggle={() => void toggleSandbox(sandbox)}
-                onRefresh={() => void loadConnectionDetails(sandbox.workerId, sandbox.workerName)}
                 onRename={() => {
                   const nextName = window.prompt("Rename workspace", sandbox.workerName)?.trim();
                   if (!nextName || nextName === sandbox.workerName) {
@@ -458,3 +369,4 @@ export function BackgroundAgentsScreen() {
     </DashboardPageTemplate>
   );
 }
+import { useState } from "react";

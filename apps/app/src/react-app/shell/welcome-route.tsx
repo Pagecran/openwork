@@ -123,12 +123,17 @@ export function WelcomeRoute() {
   const [state, dispatch] = useReducer(welcomeReducer, initialWelcomeState);
   const [manualFolder, setManualFolder] = useState("");
 
-  // If user already completed onboarding, redirect away immediately.
+  // Cloud-signed-in users should continue through org onboarding rather than
+  // the local workspace welcome flow.
   useEffect(() => {
+    if (denAuth.isSignedIn) {
+      navigate("/onboarding", { replace: true });
+      return;
+    }
     if (local.prefs.hasCompletedOnboarding) {
       navigate("/session", { replace: true });
     }
-  }, [local.prefs.hasCompletedOnboarding, navigate]);
+  }, [denAuth.isSignedIn, local.prefs.hasCompletedOnboarding, navigate]);
 
   const markOnboardingComplete = useCallback(() => {
     local.setPrefs((prev) => ({ ...prev, hasCompletedOnboarding: true }));

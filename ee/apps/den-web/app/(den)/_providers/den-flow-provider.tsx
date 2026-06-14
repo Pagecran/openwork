@@ -234,13 +234,18 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
         ? listItemToWorker(selectedWorker, worker)
         : worker;
   const openworkConnectUrl = activeWorker?.openworkUrl ?? activeWorker?.instanceUrl ?? null;
-  const preferredOpenworkToken = activeWorker?.clientToken ?? activeWorker?.ownerToken ?? null;
+  const preferredOpenworkToken = activeWorker?.clientToken ?? null;
   const hasWorkspaceScopedUrl = Boolean(openworkConnectUrl && /\/w\/[^/?#]+/.test(openworkConnectUrl));
   const openworkDeepLink = buildOpenworkDeepLink(
     openworkConnectUrl,
     preferredOpenworkToken,
     activeWorker?.workerId ?? null,
-    activeWorker?.workerName ?? null
+    activeWorker?.workerName ?? null,
+    {
+      clientToken: activeWorker?.clientToken ?? null,
+      denBaseUrl: typeof window === "undefined" ? null : window.location.origin,
+      denApiBaseUrl: typeof window === "undefined" ? null : `${window.location.origin}/api/den`,
+    }
   );
   const openworkAppConnectUrl = buildOpenworkAppConnectUrl(
     OPENWORK_APP_CONNECT_BASE_URL,
@@ -248,7 +253,12 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     preferredOpenworkToken,
     activeWorker?.workerId ?? null,
     activeWorker?.workerName ?? null,
-    { autoConnect: true }
+    {
+      autoConnect: true,
+      clientToken: activeWorker?.clientToken ?? null,
+      denBaseUrl: typeof window === "undefined" ? null : window.location.origin,
+      denApiBaseUrl: typeof window === "undefined" ? null : `${window.location.origin}/api/den`,
+    }
   );
   const ownedWorkerCount = workers.filter((item) => item.isMine).length;
   const additionalWorkerNeedsPlan = Boolean(
@@ -561,7 +571,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const accessToken = candidate.clientToken?.trim() ?? candidate.ownerToken?.trim() ?? "";
+    const accessToken = candidate.clientToken?.trim() ?? "";
     if (!accessToken) {
       const mountedWorkspaceId = parseWorkspaceIdFromUrl(instanceUrl);
       return {
@@ -1248,7 +1258,8 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
           headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
           body: JSON.stringify({
             name: resolvedLaunchName,
-            destination: "cloud"
+            destination: "cloud",
+            source: options.source ?? "manual"
           })
         },
         12000
@@ -1861,7 +1872,7 @@ export function DenFlowProvider({ children }: { children: ReactNode }) {
     if (pendingRestoredWorkerId === worker.workerId) {
       return;
     }
-    if (worker.ownerToken || worker.clientToken) {
+    if (worker.clientToken) {
       return;
     }
     if (actionBusy !== null || launchBusy) {

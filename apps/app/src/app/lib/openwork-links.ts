@@ -4,6 +4,12 @@ import { normalizeOpenworkServerUrl } from "./openwork-server";
 export type RemoteWorkspaceDefaults = {
   openworkHostUrl?: string | null;
   openworkToken?: string | null;
+  openworkClientToken?: string | null;
+  openworkHostToken?: string | null;
+  openworkDenBaseUrl?: string | null;
+  openworkDenApiBaseUrl?: string | null;
+  openworkDenOrgId?: string | null;
+  openworkDenWorkerId?: string | null;
   directory?: string | null;
   displayName?: string | null;
   autoConnect?: boolean;
@@ -41,9 +47,9 @@ export function parseRemoteConnectDeepLink(rawUrl: string): RemoteWorkspaceDefau
   }
 
   const hostUrlRaw = url.searchParams.get("openworkHostUrl") ?? url.searchParams.get("openworkUrl") ?? "";
-  const tokenRaw = url.searchParams.get("openworkToken") ?? url.searchParams.get("accessToken") ?? "";
+  const clientToken = (url.searchParams.get("openworkClientToken") ?? "").trim();
+  const token = clientToken || (url.searchParams.get("openworkToken") ?? "").trim() || (url.searchParams.get("accessToken") ?? "").trim();
   const normalizedHostUrl = normalizeOpenworkServerUrl(hostUrlRaw);
-  const token = tokenRaw.trim();
   if (!normalizedHostUrl || !token) {
     return null;
   }
@@ -61,6 +67,12 @@ export function parseRemoteConnectDeepLink(rawUrl: string): RemoteWorkspaceDefau
   return {
     openworkHostUrl: normalizedHostUrl,
     openworkToken: token,
+    openworkClientToken: clientToken || null,
+    openworkHostToken: url.searchParams.get("openworkHostToken")?.trim() || null,
+    openworkDenBaseUrl: url.searchParams.get("openworkDenBaseUrl")?.trim() || null,
+    openworkDenApiBaseUrl: url.searchParams.get("openworkDenApiBaseUrl")?.trim() || null,
+    openworkDenOrgId: url.searchParams.get("openworkDenOrgId")?.trim() || null,
+    openworkDenWorkerId: url.searchParams.get("openworkDenWorkerId")?.trim() || workerId || null,
     directory: null,
     displayName: displayName || null,
     autoConnect,
@@ -80,6 +92,12 @@ export function stripRemoteConnectQuery(rawUrl: string): string | null {
     "openworkHostUrl",
     "openworkUrl",
     "openworkToken",
+    "openworkClientToken",
+    "openworkHostToken",
+    "openworkDenBaseUrl",
+    "openworkDenApiBaseUrl",
+    "openworkDenOrgId",
+    "openworkDenWorkerId",
     "accessToken",
     "workerId",
     "workerName",

@@ -49,12 +49,18 @@ export function registerWorkerRuntimeRoutes<T extends { Variables: WorkerRouteVa
     }
 
     const instance = await getLatestWorkerInstance(worker.id)
-    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
+    const canReadStaticWorkerRuntime = instance?.provider === "static" && canReadStaticWorkerTokensForMember({
       worker,
       userId: user.id,
       currentMember: organizationContext?.currentMember,
-    })) {
-      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can access static worker runtime operations." }, 403)
+    })
+    if (worker.created_by_user_id !== user.id && !canReadStaticWorkerRuntime) {
+      return c.json({
+        error: "forbidden",
+        message: instance?.provider === "static"
+          ? "Only the worker creator, organization owners, and admins can access static worker runtime operations."
+          : "Only the worker owner can read this worker runtime.",
+      }, 403)
     }
 
     const runtime = await fetchWorkerRuntimeJson({
@@ -114,14 +120,19 @@ export function registerWorkerRuntimeRoutes<T extends { Variables: WorkerRouteVa
     }
 
     const instance = await getLatestWorkerInstance(worker.id)
-    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
+    const canUpgradeStaticWorker = instance?.provider === "static" && canReadStaticWorkerTokensForMember({
       worker,
       userId: user.id,
       currentMember: organizationContext?.currentMember,
-    })) {
-      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can access static worker runtime operations." }, 403)
+    })
+    if (worker.created_by_user_id !== user.id && !canUpgradeStaticWorker) {
+      return c.json({
+        error: "forbidden",
+        message: instance?.provider === "static"
+          ? "Only the worker creator, organization owners, and admins can access static worker runtime operations."
+          : "Only the worker owner can upgrade this worker runtime.",
+      }, 403)
     }
-
     const runtime = await fetchWorkerRuntimeJson({
       workerId: worker.id,
       path: "/runtime/upgrade",

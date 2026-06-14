@@ -926,14 +926,19 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
     }
 
     const instance = await getLatestWorkerInstance(worker.id)
-    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
+    const canReadStaticWorkerTokens = instance?.provider === "static" && canReadStaticWorkerTokensForMember({
       worker,
       userId: user.id,
       currentMember: organizationContext?.currentMember,
-    })) {
-      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can read static worker tokens." }, 403)
+    })
+    if (worker.created_by_user_id !== user.id && !canReadStaticWorkerTokens) {
+      return c.json({
+        error: "forbidden",
+        message: instance?.provider === "static"
+          ? "Only the worker creator, organization owners, and admins can read static worker tokens."
+          : "Only the worker owner can request worker tokens.",
+      }, 403)
     }
-
     const resolved = await getWorkerTokensAndConnect(worker)
     if ("error" in resolved && resolved.error) {
       return new Response(JSON.stringify(resolved.error.body), {
@@ -988,14 +993,19 @@ export function registerWorkerCoreRoutes<T extends { Variables: WorkerRouteVaria
     }
 
     const instance = await getLatestWorkerInstance(worker.id)
-    if (instance?.provider === "static" && !canReadStaticWorkerTokensForMember({
+    const canDeleteStaticWorker = instance?.provider === "static" && canReadStaticWorkerTokensForMember({
       worker,
       userId: user.id,
       currentMember: organizationContext?.currentMember,
-    })) {
-      return c.json({ error: "forbidden", message: "Only the worker creator, organization owners, and admins can delete static workers." }, 403)
+    })
+    if (worker.created_by_user_id !== user.id && !canDeleteStaticWorker) {
+      return c.json({
+        error: "forbidden",
+        message: instance?.provider === "static"
+          ? "Only the worker creator, organization owners, and admins can delete static workers."
+          : "Only the worker owner can delete this worker.",
+      }, 403)
     }
-
     await deleteWorkerCascade(worker)
     return c.body(null, 204)
     },
