@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  isDesktopFetchAllowedForDenBootstrap,
+  isDesktopFetchAllowedForWorkspaces,
   openworkWorkspaceDisplayName,
   selectOpenworkWorkspaceForConnection,
 } from "./remote-workspace.mjs";
@@ -84,6 +86,45 @@ describe("selectOpenworkWorkspaceForConnection", () => {
     );
 
     assert.equal(selected?.id, "ws_legacy");
+  });
+});
+
+describe("isDesktopFetchAllowedForWorkspaces", () => {
+  const workspaces = [
+    {
+      workspaceType: "remote",
+      baseUrl: "https://worker.example.com/w/rem_ws_123",
+      openworkHostUrl: "https://worker.example.com",
+    },
+    { workspaceType: "local", baseUrl: "https://ignored.example.com" },
+  ];
+
+  it("allows configured remote workspace origins", () => {
+    assert.equal(isDesktopFetchAllowedForWorkspaces("https://worker.example.com/workspaces", workspaces), true);
+  });
+
+  it("rejects unconfigured origins and non-HTTP protocols", () => {
+    assert.equal(isDesktopFetchAllowedForWorkspaces("https://attacker.example.com/workspaces", workspaces), false);
+    assert.equal(isDesktopFetchAllowedForWorkspaces("file:///etc/passwd", workspaces), false);
+  });
+});
+
+describe("isDesktopFetchAllowedForDenBootstrap", () => {
+  it("allows configured Den web and API origins before a workspace exists", () => {
+    const bootstrap = {
+      baseUrl: "https://den.company.local",
+      apiBaseUrl: "https://den-api.company.local",
+    };
+
+    assert.equal(isDesktopFetchAllowedForDenBootstrap("https://den.company.local/api/auth/get-session", bootstrap), true);
+    assert.equal(isDesktopFetchAllowedForDenBootstrap("https://den-api.company.local/v1/workers", bootstrap), true);
+  });
+
+  it("rejects unconfigured Den origins and non-HTTP protocols", () => {
+    const bootstrap = { baseUrl: "https://den.company.local", apiBaseUrl: null };
+
+    assert.equal(isDesktopFetchAllowedForDenBootstrap("https://attacker.example.com/v1/workers", bootstrap), false);
+    assert.equal(isDesktopFetchAllowedForDenBootstrap("file:///etc/passwd", bootstrap), false);
   });
 });
 
