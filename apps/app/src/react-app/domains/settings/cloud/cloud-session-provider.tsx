@@ -11,11 +11,12 @@ import {
 } from "../../../../app/lib/den";
 import { denSettingsChangedEvent } from "../../../../app/lib/den-session-events";
 
-type CloudActiveOrganization = Pick<DenOrgSummary, "id" | "name" | "slug">;
+type CloudActiveOrganization = Pick<DenOrgSummary, "id" | "name" | "slug" | "role">;
 
 type CloudSessionContextValue = {
   client: DenClient;
   baseUrl: string;
+  apiBaseUrl: string;
   setBaseUrl: React.Dispatch<React.SetStateAction<string>>;
   authToken: string;
   setAuthToken: React.Dispatch<React.SetStateAction<string>>;
@@ -55,6 +56,7 @@ export function CloudSessionProvider({ children }: CloudSessionProviderProps) {
         id,
         name: initial.activeOrgName?.trim() || "",
         slug: initial.activeOrgSlug?.trim() || "",
+        role: "member",
       };
     });
   const activeOrgName = activeOrganization?.name ?? "";
@@ -80,6 +82,7 @@ export function CloudSessionProvider({ children }: CloudSessionProviderProps) {
     () => ({
       client,
       baseUrl,
+      apiBaseUrl,
       setBaseUrl,
       authToken,
       setAuthToken,
@@ -94,7 +97,7 @@ export function CloudSessionProvider({ children }: CloudSessionProviderProps) {
       activeOrgName,
       hasActiveOrg,
     }),
-    [activeOrgName, activeOrganization, authToken, baseUrl, client, hasActiveOrg, isSignedIn, statusMessage, user],
+    [activeOrgName, activeOrganization, apiBaseUrl, authToken, baseUrl, client, hasActiveOrg, isSignedIn, statusMessage, user],
   );
 
   return <CloudSessionContext.Provider value={value}>{children}</CloudSessionContext.Provider>;

@@ -26,6 +26,12 @@ export interface WorkspaceConfig {
   displayName?: string;
   openworkHostUrl?: string;
   openworkToken?: string;
+  openworkClientToken?: string;
+  openworkHostToken?: string;
+  openworkDenBaseUrl?: string;
+  openworkDenApiBaseUrl?: string;
+  openworkDenOrgId?: string;
+  openworkDenWorkerId?: string;
   openworkWorkspaceId?: string;
   openworkWorkspaceName?: string;
   sandboxBackend?: string;
@@ -47,6 +53,12 @@ export interface WorkspaceInfo {
   displayName?: string;
   openworkHostUrl?: string;
   openworkToken?: string;
+  openworkClientToken?: string;
+  openworkHostToken?: string;
+  openworkDenBaseUrl?: string;
+  openworkDenApiBaseUrl?: string;
+  openworkDenOrgId?: string;
+  openworkDenWorkerId?: string;
   openworkWorkspaceId?: string;
   openworkWorkspaceName?: string;
   sandboxBackend?: string;

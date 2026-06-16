@@ -202,9 +202,8 @@ export function resolveRemoteWorkspaceConnectionTarget(workspace: WorkspaceInfo)
     null;
   const hostBaseUrl = stripOpenworkWorkspaceMount(normalizedHostUrl);
   const token =
-    trim(workspace.openworkToken) ||
     trim(workspace.openworkClientToken) ||
-    trim(workspace.openworkHostToken);
+    trim(workspace.openworkToken);
 
   return {
     ok: true,

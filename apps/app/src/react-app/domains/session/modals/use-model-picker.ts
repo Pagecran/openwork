@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { isDesktopProviderBlocked } from "@/app/cloud/desktop-app-restrictions";
+import { buildCloudManagedModelOptions } from "@/app/cloud/managed-provider-models";
 import type { Client, ModelOption } from "@/app/types";
 import { useCheckDesktopRestriction } from "@/react-app/domains/cloud/desktop-config-provider";
 import {
@@ -21,13 +22,15 @@ import {
 export type UseModelPickerInput = {
   client: Client | null;
   baseUrl: string;
+  openworkToken?: string | null;
+  cloudManagedModelIdsByProvider?: Map<string, Set<string>>;
   workspaceRoot: string;
   /** Optional: surface option-load failures (settings shows a toast; the session route stays silent). */
   onLoadError?: (error: unknown) => void;
 };
 
 export function useModelPicker(input: UseModelPickerInput) {
-  const { client, baseUrl, workspaceRoot, onLoadError } = input;
+  const { client, baseUrl, openworkToken, cloudManagedModelIdsByProvider, workspaceRoot, onLoadError } = input;
   const checkDesktopRestriction = useCheckDesktopRestriction();
 
   const [open, setOpen] = useState(false);
@@ -82,6 +85,7 @@ export function useModelPicker(input: UseModelPickerInput) {
         const data = await ensureProviderListQuery(getReactQueryClient(), {
           client,
           baseUrl,
+          openworkToken,
           directory: workspaceRoot || undefined,
         });
         if (cancelled || !data?.all) return;
@@ -96,28 +100,11 @@ export function useModelPicker(input: UseModelPickerInput) {
         } catch {
           seenIds = new Set();
         }
-        const options: ModelOption[] = [];
-        for (const provider of getConnectedProviderItems(data)) {
-          const modelIds = Object.keys(provider.models);
-          const isNew = !seenIds.has(provider.id) || recentProviderIds.has(provider.id);
-          for (const id of modelIds) {
-            const model = provider.models[id];
-            options.push({
-              providerID: provider.id,
-              modelID: id,
-              title: model.name || id,
-              description: provider.name,
-              behaviorTitle: "Reasoning",
-              behaviorLabel: "Default",
-              behaviorDescription: "",
-              behaviorValue: null,
-              isFree: false,
-              isConnected: true,
-              isRecommended: isNew,
-              source: /^lpr_/i.test(provider.id) ? "cloud" as const : undefined,
-            });
-          }
-        }
+        const options = buildCloudManagedModelOptions({
+          providers: getConnectedProviderItems(data),
+          cloudManagedModelIdsByProvider: cloudManagedModelIdsByProvider ?? new Map<string, Set<string>>(),
+          isRecommendedProvider: (providerId) => !seenIds.has(providerId) || recentProviderIds.has(providerId),
+        });
         setModelOptions(options);
       } catch (error) {
         // Default: silent — the picker surfaces an empty list rather than
@@ -128,7 +115,7 @@ export function useModelPicker(input: UseModelPickerInput) {
     return () => {
       cancelled = true;
     };
-  }, [open, baseUrl, client, recentProviderIds, workspaceRoot]);
+  }, [open, baseUrl, client, cloudManagedModelIdsByProvider, openworkToken, recentProviderIds, workspaceRoot]);
 
   // Apply org-level restrictions (dev #1505) on top of the raw model list
   // so the picker never surfaces blocked options:

@@ -1,0 +1,62 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { desktopFetch } from "./desktop-fetch.mjs";
+
+test("desktop fetch forwards method, headers, body, and response details", async () => {
+  const calls = [];
+  const result = await desktopFetch("https://worker.example.test/env", {
+    method: "POST",
+    headers: { Authorization: "Bearer client-token" },
+    body: "{}",
+  }, async (url, init) => {
+    calls.push({ url, init });
+    return new Response("ok", {
+      status: 202,
+      statusText: "Accepted",
+      headers: { "x-test": "yes" },
+    });
+  });
+
+  assert.equal(calls[0].url, "https://worker.example.test/env");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(calls[0].init.headers, { Authorization: "Bearer client-token" });
+  assert.equal(calls[0].init.body, "{}");
+  assert.equal(result.status, 202);
+  assert.equal(result.statusText, "Accepted");
+  assert.equal(new Map(result.headers).get("x-test"), "yes");
+  assert.equal(result.body, "ok");
+});
+
+test("desktop fetch forwards non-string bodies", async () => {
+  const body = new URLSearchParams({ key: "value" });
+  const calls = [];
+  await desktopFetch("https://worker.example.test/env", {
+    method: "POST",
+    body,
+  }, async (url, init) => {
+    calls.push({ url, init });
+    return new Response("ok");
+  });
+
+  assert.equal(calls[0].init.body, body);
+});
+
+test("desktop fetch honors timeoutMs with a controlled error", async () => {
+  await assert.rejects(
+    desktopFetch("https://worker.example.test/slow", { timeoutMs: 1 }, async (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason ?? new Error("aborted")), { once: true });
+    })),
+    /Fetch timed out after 1ms/,
+  );
+});
+
+test("desktop fetch honors caller abort signal", async () => {
+  const controller = new AbortController();
+  const request = desktopFetch("https://worker.example.test/abort", { signal: controller.signal }, async (_url, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(init.signal.reason ?? new Error("aborted")), { once: true });
+  }));
+
+  controller.abort(new Error("caller aborted"));
+  await assert.rejects(request, /caller aborted/);
+});

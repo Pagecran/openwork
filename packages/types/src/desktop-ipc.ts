@@ -276,6 +276,10 @@ export type WorkspaceCreateRemoteInput = {
   openworkHostToken?: string | null;
   openworkWorkspaceId?: string | null;
   openworkWorkspaceName?: string | null;
+  openworkDenBaseUrl?: string | null;
+  openworkDenApiBaseUrl?: string | null;
+  openworkDenOrgId?: string | null;
+  openworkDenWorkerId?: string | null;
   sandboxBackend?: string | null;
   sandboxRunId?: string | null;
   sandboxContainerName?: string | null;

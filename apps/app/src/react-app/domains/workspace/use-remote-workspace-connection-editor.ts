@@ -49,9 +49,8 @@ export function useRemoteWorkspaceConnectionEditor<TWorkspace extends WorkspaceI
       return {
         openworkHostUrl: mountedUrl,
         openworkToken:
-          workspace?.openworkToken ??
           workspace?.openworkClientToken ??
-          workspace?.openworkHostToken ??
+          workspace?.openworkToken ??
           "",
         directory: workspace?.directory ?? workspace?.path ?? "",
         displayName: workspace?.displayName ?? workspace?.name ?? "",
@@ -59,6 +58,7 @@ export function useRemoteWorkspaceConnectionEditor<TWorkspace extends WorkspaceI
     },
     [workspace],
   );
+  const currentClientToken = workspace?.openworkClientToken ?? null;
 
   const open = useCallback(
     (nextWorkspaceId: string) => {
@@ -93,8 +93,8 @@ export function useRemoteWorkspaceConnectionEditor<TWorkspace extends WorkspaceI
           baseUrl,
           openworkHostUrl: baseUrl,
           openworkToken: fields.openworkToken?.trim() ?? "",
-          openworkClientToken: "",
-          openworkHostToken: "",
+          openworkClientToken: fields.openworkToken?.trim() || currentClientToken,
+          openworkHostToken: null,
           displayName: fields.displayName?.trim() || null,
           directory: fields.directory?.trim() || null,
           remoteType: "openwork",
@@ -107,7 +107,7 @@ export function useRemoteWorkspaceConnectionEditor<TWorkspace extends WorkspaceI
         setBusy(false);
       }
     },
-    [onSaved, workspaceId],
+    [currentClientToken, onSaved, workspaceId],
   );
 
   return {
