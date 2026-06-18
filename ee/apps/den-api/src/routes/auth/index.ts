@@ -1,3 +1,5 @@
+import { eq } from "@openwork-ee/den-db/drizzle"
+import { OAuthClientTable } from "@openwork-ee/den-db/schema"
 import { oauthProviderAuthServerMetadata, oauthProviderOpenIdConfigMetadata } from "@better-auth/oauth-provider"
 import type { Hono } from "hono"
 import { describeRoute } from "hono-openapi"
@@ -9,7 +11,10 @@ import {
   readEmailPasswordSignInAttempt,
   recordEmailPasswordSignInResult,
 } from "../../auth-protection.js"
+import { db } from "../../db.js"
+import { isEntraSsoEnabled } from "../../entra-sso.js"
 import { env } from "../../env.js"
+import { getMcpClientCompatibilityScopeUpdate } from "../../mcp/client-scope-compat.js"
 import { getInvalidMcpOAuthRedirectUris } from "../../mcp/oauth-client-policy.js"
 import { normalizeMcpOAuthClientScope } from "../../mcp/scopes.js"
 import { publicRoute, tokenRoute } from "../../middleware/index.js"
@@ -112,6 +117,65 @@ function requestOrigin(request: Request) {
   return new URL(request.url).origin
 }
 
+function readStoredClientScopes(scopes: string | null) {
+  if (!scopes) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(scopes) as unknown
+    if (Array.isArray(parsed)) return parsed.filter((entry): entry is string => typeof entry === "string")
+  } catch {}
+
+  return scopes.split(/\s+/).filter(Boolean)
+}
+
+const authProvidersSchema = z.object({
+  socialProviders: z.array(z.enum(["github", "google", "microsoft"])),
+}).meta({ ref: "AuthProviders" })
+
+function getConfiguredSocialProviders() {
+  return [
+    env.github.clientId && env.github.clientSecret ? "github" : null,
+    env.google.clientId && env.google.clientSecret ? "google" : null,
+    isEntraSsoEnabled(env.entra) ? "microsoft" : null,
+  ].filter((provider): provider is "github" | "google" | "microsoft" => provider !== null)
+}
+
+async function ensureMcpClientScopes(request: Request) {
+  const url = new URL(request.url)
+  const requestedScopes = new Set((url.searchParams.get("scope") ?? "").split(/\s+/).filter(Boolean))
+  if (!requestedScopes.has("mcp:read") && !requestedScopes.has("mcp:write")) {
+    return
+  }
+
+  const clientId = url.searchParams.get("client_id")
+  if (!clientId) {
+    return
+  }
+
+  const [client] = await db
+    .select({ scopes: OAuthClientTable.scopes })
+    .from(OAuthClientTable)
+    .where(eq(OAuthClientTable.clientId, clientId))
+    .limit(1)
+  if (!client) {
+    return
+  }
+
+  const scopes = getMcpClientCompatibilityScopeUpdate({
+    storedScopes: readStoredClientScopes(client.scopes),
+    requestedScopes: Array.from(requestedScopes),
+  })
+  if (!scopes) {
+    return
+  }
+  await db
+    .update(OAuthClientTable)
+    .set({ scopes: JSON.stringify(scopes) })
+    .where(eq(OAuthClientTable.clientId, clientId))
+}
+
 const authLoginLockedSchema = z.object({
   error: z.literal("login_locked"),
   message: z.string(),
@@ -147,6 +211,19 @@ export function registerAuthRoutes<T extends { Variables: AuthContextVariables }
   registerScimAuthRoutes(app)
   app.use("/api/auth/sso/saml2/callback/*", samlResponsePolicyMiddleware)
   app.use("/api/auth/sso/saml2/sp/acs/*", samlResponsePolicyMiddleware)
+  app.get(
+    "/v1/auth/providers",
+    describeRoute({
+      tags: ["Authentication"],
+      summary: "List configured authentication providers",
+      description: "Returns the social authentication providers currently configured for this Den deployment.",
+      responses: {
+        200: jsonResponse("Configured authentication providers.", authProvidersSchema),
+      },
+    }),
+    publicRoute,
+    (c) => c.json({ socialProviders: getConfiguredSocialProviders() }),
+  )
   app.get("/api/auth/.well-known/oauth-authorization-server", publicRoute, async (c) => rewriteMetadataOrigin(await oauthProviderAuthServerMetadata(auth)(c.req.raw), requestOrigin(c.req.raw)))
   app.get("/api/auth/.well-known/openid-configuration", publicRoute, async (c) => rewriteMetadataOrigin(await oauthProviderOpenIdConfigMetadata(auth)(c.req.raw), requestOrigin(c.req.raw)))
   app.get("/.well-known/oauth-authorization-server/api/auth", publicRoute, async (c) => rewriteMetadataOrigin(await oauthProviderAuthServerMetadata(auth)(c.req.raw), requestOrigin(c.req.raw)))
@@ -155,7 +232,10 @@ export function registerAuthRoutes<T extends { Variables: AuthContextVariables }
   app.get("/.well-known/openid-configuration", publicRoute, async (c) => rewriteMetadataOrigin(await oauthProviderOpenIdConfigMetadata(auth)(rewriteAuthRequest(c.req.raw, "/api/auth/.well-known/openid-configuration")), requestOrigin(c.req.raw)))
   app.post("/register", publicRoute, async (c) => handleMcpClientRegistrationRequest(c.req.raw, "/api/auth/oauth2/register"))
   app.post("/api/auth/oauth2/register", publicRoute, async (c) => handleMcpClientRegistrationRequest(c.req.raw, "/api/auth/oauth2/register"))
-  app.get("/api/auth/oauth2/authorize", tokenRoute, (c) => auth.handler(c.req.raw))
+  app.get("/api/auth/oauth2/authorize", tokenRoute, async (c) => {
+    await ensureMcpClientScopes(c.req.raw)
+    return auth.handler(c.req.raw)
+  })
 
   app.on(
     ["GET", "POST", "PUT", "PATCH", "DELETE"],

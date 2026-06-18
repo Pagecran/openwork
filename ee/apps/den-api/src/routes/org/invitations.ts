@@ -1,5 +1,5 @@
-import { and, eq, gt, isNull } from "@openwork-ee/den-db/drizzle"
-import { AuthUserTable, InvitationTable, MemberTable } from "@openwork-ee/den-db/schema"
+import { and, eq, gt, isNull, sql } from "@openwork-ee/den-db/drizzle"
+import { AuthUserTable, InvitationTable, MemberTable, TeamMemberTable } from "@openwork-ee/den-db/schema"
 import { createDenTypeId, normalizeDenTypeId } from "@openwork-ee/utils/typeid"
 import type { Hono } from "hono"
 import { describeRoute } from "hono-openapi"
@@ -8,7 +8,7 @@ import { ORGANIZATION_AUDIT_ACTIONS, recordOrganizationAuditEvent } from "../../
 import { db } from "../../db.js"
 import { jsonValidator, orgRoleRoute, paramValidator } from "../../middleware/index.js"
 import { denTypeIdSchema, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, successSchema, unauthorizedSchema } from "../../openapi.js"
-import { runPostOrganizationMemberChangeHooks } from "../../organization-member-hooks.js"
+import { runPostOrganizationMemberChangeHooks, syncOrganizationMemberBillingQuantities } from "../../organization-member-hooks.js"
 import { resolveOrganizationPermissionRecord, validateAssignableOrganizationPermissionRecord } from "../../organization-access.js"
 import { isEmailAllowedForOrganization, listAssignableRoles, removeOrganizationMember } from "../../orgs.js"
 import { getOrganizationSeatAddEligibility } from "../../stripe-billing.js"
@@ -53,8 +53,57 @@ const invitePaymentRequiredSchema = z.object({
 }).meta({ ref: "InvitePaymentRequiredError" })
 
 type InvitationId = typeof InvitationTable.$inferSelect.id
+type OrganizationId = typeof InvitationTable.$inferSelect.organizationId
+type MemberId = typeof MemberTable.$inferSelect.id
 
 const orgInvitationParamsSchema = idParamSchema("invitationId", "invitation")
+
+async function cleanupExpiredInvitationPlaceholders(input: {
+  organizationId: OrganizationId
+  email?: string
+  removedByOrgMemberId: MemberId
+}) {
+  const where = input.email
+    ? and(
+        eq(InvitationTable.organizationId, input.organizationId),
+        eq(InvitationTable.email, input.email),
+        eq(InvitationTable.status, "pending"),
+        sql`${InvitationTable.expiresAt} < ${new Date()}`,
+      )
+    : and(
+        eq(InvitationTable.organizationId, input.organizationId),
+        eq(InvitationTable.status, "pending"),
+        sql`${InvitationTable.expiresAt} < ${new Date()}`,
+      )
+
+  const expiredInvitations = await db
+    .select({ id: InvitationTable.id })
+    .from(InvitationTable)
+    .where(where)
+
+  for (const invitation of expiredInvitations) {
+    const invitedMemberRows = await db
+      .select({ id: MemberTable.id })
+      .from(MemberTable)
+      .where(and(eq(MemberTable.inviteId, invitation.id), eq(MemberTable.organizationId, input.organizationId), isNull(MemberTable.joinedAt), isNull(MemberTable.removedAt)))
+      .limit(1)
+
+    await db.update(InvitationTable).set({ status: "canceled" }).where(eq(InvitationTable.id, invitation.id))
+
+    if (invitedMemberRows[0]) {
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(TeamMemberTable)
+          .where(eq(TeamMemberTable.orgMembershipId, invitedMemberRows[0].id))
+        await tx
+          .update(MemberTable)
+          .set({ removedAt: new Date(), removedByOrgMember: input.removedByOrgMemberId, userId: null })
+          .where(and(eq(MemberTable.id, invitedMemberRows[0].id), isNull(MemberTable.removedAt)))
+      })
+      await syncOrganizationMemberBillingQuantities({ organizationId: input.organizationId })
+    }
+  }
+}
 
 export function registerOrgInvitationRoutes<T extends { Variables: OrgRouteVariables }>(app: Hono<T>) {
   app.post(
@@ -132,6 +181,11 @@ export function registerOrgInvitationRoutes<T extends { Variables: OrgRouteVaria
         message: "That email address is already a member of this organization.",
       }, 409)
     }
+
+    await cleanupExpiredInvitationPlaceholders({
+      organizationId: payload.organization.id,
+      removedByOrgMemberId: payload.currentMember.id,
+    })
 
     const existingInvitation = await db
       .select()
