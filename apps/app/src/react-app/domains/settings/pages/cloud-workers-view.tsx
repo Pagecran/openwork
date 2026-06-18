@@ -17,6 +17,7 @@ export type CloudWorkersViewProps = {
     openworkClientToken?: string | null;
     openworkHostToken?: string | null;
     openworkDenBaseUrl?: string | null;
+    openworkDenApiBaseUrl?: string | null;
     openworkDenOrgId?: string | null;
     openworkDenWorkerId?: string | null;
     directory?: string | null;
@@ -29,7 +30,7 @@ export function CloudWorkersView({
   connectRemoteWorkspace,
   onOpenAccount,
 }: CloudWorkersViewProps) {
-  const { activeOrganization: activeOrg, authToken, baseUrl, client, isSignedIn, user } = useCloudSession();
+  const { activeOrganization: activeOrg, apiBaseUrl, authToken, baseUrl, client, isSignedIn, user } = useCloudSession();
   const [workersBusy, setWorkersBusy] = React.useState(false);
   const [launchBusy, setLaunchBusy] = React.useState(false);
   const [openingWorkerId, setOpeningWorkerId] = React.useState<string | null>(null);
@@ -43,6 +44,7 @@ export function CloudWorkersView({
     hostToken: "",
   });
   const activeOrgId = activeOrg?.id ?? "";
+  const canAttachStaticWorker = activeOrg?.role === "owner" || activeOrg?.role === "admin";
 
   const refreshWorkers = React.useCallback(
     async (quiet = false) => {
@@ -130,6 +132,7 @@ export function CloudWorkersView({
           openworkClientToken: tokens.clientToken?.trim() || null,
           openworkHostToken: tokens.hostToken?.trim() || null,
           openworkDenBaseUrl: baseUrl,
+          openworkDenApiBaseUrl: apiBaseUrl,
           openworkDenOrgId: activeOrgId,
           openworkDenWorkerId: workerId,
           directory: null,
@@ -150,7 +153,7 @@ export function CloudWorkersView({
         setOpeningWorkerId(null);
       }
     },
-    [activeOrgId, baseUrl, client, connectRemoteWorkspace],
+    [activeOrgId, apiBaseUrl, baseUrl, client, connectRemoteWorkspace],
   );
 
   const attachStaticWorker = React.useCallback(async () => {
@@ -210,7 +213,7 @@ export function CloudWorkersView({
   return (
     <SettingsStack>
       <Separator />
-      <SettingsNotice>
+      {canAttachStaticWorker ? <SettingsNotice>
         <div className="flex flex-col gap-3">
           <div>
             <div className="text-sm font-medium">Admin/operator: attach LAN static worker</div>
@@ -248,7 +251,7 @@ export function CloudWorkersView({
             </Button>
           </div>
         </div>
-      </SettingsNotice>
+      </SettingsNotice> : null}
       <CloudWorkersSection
         launchBusy={launchBusy}
         openingWorkerId={openingWorkerId}

@@ -53,6 +53,21 @@ function isOpenworkServerReady(info?: BootOpenworkServerInfo) {
   );
 }
 
+function remoteWorkspaceServerInfo(workspace?: WorkspaceInfo): BootOpenworkServerInfo | null {
+  if (workspace?.workspaceType !== "remote" || workspace.remoteType !== "openwork") return null;
+  const baseUrl = (workspace.baseUrl ?? workspace.openworkHostUrl ?? "").trim();
+  const token = (workspace.openworkClientToken ?? workspace.openworkToken ?? "").trim();
+  if (!baseUrl || !token) return null;
+  return {
+    running: true,
+    baseUrl,
+    ownerToken: token,
+    clientToken: token,
+    hostToken: workspace.openworkHostToken?.trim() || null,
+    remoteAccessEnabled: false,
+  };
+}
+
 /**
  * On desktop (Tauri) startup:
  *   1) bootstrap the workspace list
@@ -131,7 +146,11 @@ export function useDesktopRuntimeBoot() {
         setPhase("bootstrapping-workspaces");
         const list = await workspaceBootstrap().catch(() => null) as WorkspaceList | null;
         if (!list) {
-          await startServerWithoutDesktopWorkspace();
+          markReady();
+          return;
+        }
+        if (list.workspaces.length === 0) {
+          markReady();
           return;
         }
 
@@ -139,14 +158,22 @@ export function useDesktopRuntimeBoot() {
         const workspace = selectedId
           ? list.workspaces.find((w) => w.id === selectedId)
           : undefined;
+        const remoteServerInfo = remoteWorkspaceServerInfo(workspace);
+        if (remoteServerInfo) {
+          setActive(remoteServerInfo.baseUrl ?? "");
+          publishOpenworkServerInfo(remoteServerInfo);
+          markReady();
+          return;
+        }
+
         if (!workspace || workspace.workspaceType === "remote") {
-          await startServerWithoutDesktopWorkspace();
+          markReady();
           return;
         }
 
         const workspaceRoot = workspace.path?.trim();
         if (!workspaceRoot) {
-          await startServerWithoutDesktopWorkspace();
+          markReady();
           return;
         }
 

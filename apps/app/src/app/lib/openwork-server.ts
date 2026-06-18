@@ -576,6 +576,30 @@ export function parseOpenworkWorkspaceIdFromUrl(input: string) {
   }
 }
 
+export function stripOpenworkWorkspaceMount(input: string) {
+  const normalized = normalizeOpenworkServerUrl(input) ?? "";
+  if (!normalized) return "";
+
+  try {
+    const url = new URL(normalized);
+    const segments = url.pathname.split("/").filter(Boolean);
+    const mountIndex = segments.findIndex((segment, index) => {
+      if (segment !== "workspace" && segment !== "w") return false;
+      const workspaceId = segments[index + 1] ?? "";
+      return workspaceId.startsWith("ws_") || workspaceId.startsWith("workspace_") || workspaceId.startsWith("rem_") || index + 2 === segments.length;
+    });
+    if (mountIndex >= 0 && segments[mountIndex + 1]) {
+      const prefix = segments.slice(0, mountIndex).join("/");
+      url.pathname = prefix ? `/${prefix}` : "/";
+      return url.toString().replace(/\/+$/, "");
+    }
+  } catch {
+    // Fall through to the normalized value below.
+  }
+
+  return normalized.replace(/\/+$/, "");
+}
+
 export function buildOpenworkWorkspaceBaseUrl(hostUrl: string, workspaceId?: string | null) {
   const normalized = normalizeOpenworkServerUrl(hostUrl) ?? "";
   if (!normalized) return null;
@@ -694,7 +718,7 @@ export function stripOpenworkConnectInviteFromUrl(input: string) {
 export function readOpenworkServerSettings(): OpenworkServerSettings {
   if (typeof window === "undefined") return {};
   try {
-    const urlOverride = normalizeOpenworkServerUrl(
+    const urlOverride = stripOpenworkWorkspaceMount(
       window.localStorage.getItem(STORAGE_URL_OVERRIDE) ?? "",
     );
     const portRaw = window.localStorage.getItem(STORAGE_PORT_OVERRIDE) ?? "";
@@ -703,7 +727,7 @@ export function readOpenworkServerSettings(): OpenworkServerSettings {
     const hostToken = window.localStorage.getItem(STORAGE_HOST_AUTH_KEY) ?? undefined;
     const remoteAccessRaw = window.localStorage.getItem(STORAGE_REMOTE_ACCESS) ?? "";
     return {
-      urlOverride: urlOverride ?? undefined,
+      urlOverride: urlOverride || undefined,
       portOverride: Number.isNaN(portOverride) ? undefined : portOverride,
       token: token?.trim() || undefined,
       hostToken: hostToken?.trim() || undefined,
@@ -1373,6 +1397,14 @@ export function createOpenworkServerClient(options: { baseUrl: string; token?: s
         method: "POST",
         body: { scope, content },
       }),
+    deleteOpencodeConfigFile: (workspaceId: string, scope: "project" | "global") => {
+      const query = `?scope=${scope}`;
+      return requestJson<ExecResult>(baseUrl, `/workspace/${encodeURIComponent(workspaceId)}/opencode-config${query}`, {
+        token,
+        hostToken,
+        method: "DELETE",
+      });
+    },
     listReloadEvents: (workspaceId: string, options?: { since?: number }) => {
       const query = typeof options?.since === "number" ? `?since=${options.since}` : "";
       return requestJson<{ items: OpenworkReloadEvent[]; cursor?: number }>(

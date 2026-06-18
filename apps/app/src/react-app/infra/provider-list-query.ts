@@ -1,8 +1,10 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 
 import type { Client, ModelRef, ProviderListItem } from "../../app/types";
+import { desktopFetch } from "../../app/lib/desktop";
 import { unwrap } from "../../app/lib/opencode";
 import { dispatchNewProviders } from "../../app/lib/provider-events";
+import { isDesktopRuntime } from "../../app/utils";
 import type { ProviderListResponse } from "@opencode-ai/sdk/v2/client";
 
 export const PROVIDER_LIST_CACHE_MS = 5 * 60 * 1000;
@@ -21,16 +23,25 @@ export type ConnectedProviderSnapshotChange = {
   next: ConnectedProviderSnapshot;
 };
 
+type ConfiguredProviderListResponse = {
+  all?: ProviderListItem[];
+  providers?: ProviderListItem[] | Record<string, ProviderListItem>;
+  connected?: string[];
+  default?: ProviderListResponse["default"];
+};
+
 const connectedProviderSnapshots = new Map<string, ConnectedProviderSnapshot>();
 const connectedProviderSnapshotChanges = new Map<string, ConnectedProviderSnapshotChange>();
 
 export function providerListQueryKey(input: {
   baseUrl?: string | null;
+  openworkToken?: string | null;
   directory?: string | null;
 }) {
   return [
     ...PROVIDER_LIST_QUERY_ROOT,
     input.baseUrl?.trim() ?? "",
+    input.openworkToken?.trim() ? "openwork-token" : "",
     input.directory?.trim() ?? "",
   ] as const;
 }
@@ -43,15 +54,60 @@ export async function refreshProviderListQueries(queryClient: QueryClient) {
 export async function fetchProviderList(input: {
   client: Client;
   baseUrl?: string | null;
+  openworkToken?: string | null;
   directory?: string | null;
 }): Promise<ProviderListResponse> {
-  const value = unwrap(
-    await input.client.provider.list({
-      directory: input.directory?.trim() || undefined,
-    }),
-  );
+  const directConfiguredProviders = await fetchOpenworkConfiguredProviders(input);
+  if (directConfiguredProviders) {
+    recordConnectedProviderSnapshot(input, directConfiguredProviders);
+    return directConfiguredProviders;
+  }
+
+  const parameters = {
+    directory: input.directory?.trim() || undefined,
+  };
+  const configuredProviders = await input.client.config.providers(parameters);
+  const value = normalizeProviderListResponse(unwrap(configuredProviders));
   recordConnectedProviderSnapshot(input, value);
   return value;
+}
+
+async function fetchOpenworkConfiguredProviders(input: {
+  baseUrl?: string | null;
+  openworkToken?: string | null;
+}): Promise<ProviderListResponse | null> {
+  const token = input.openworkToken?.trim();
+  const baseUrl = input.baseUrl?.trim().replace(/\/+$/, "");
+  if (!token || !baseUrl || !/\/workspace\/[^/]+\/opencode$/.test(baseUrl)) return null;
+
+  const fetchImpl = isDesktopRuntime() ? desktopFetch : globalThis.fetch;
+  const response = await fetchImpl(`${baseUrl}/config/providers`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch configured providers (${response.status})`);
+  }
+  return normalizeProviderListResponse(await response.json(), { defaultConnectedToAll: false });
+}
+
+export function normalizeProviderListResponse(
+  value: ProviderListResponse | ConfiguredProviderListResponse,
+  options: { defaultConnectedToAll?: boolean } = {},
+): ProviderListResponse {
+  const providers = "providers" in value ? value.providers : undefined;
+  const all = Array.isArray(providers)
+    ? providers
+    : providers && typeof providers === "object"
+      ? Object.values(providers)
+      : Array.isArray(value.all)
+        ? value.all
+        : [];
+  return {
+    ...value,
+    all,
+    connected: value.connected ?? (options.defaultConnectedToAll === false ? [] : all.map((provider) => provider.id)),
+    default: value.default ?? {},
+  };
 }
 
 export function getConnectedProviderItems(value: ProviderListResponse | null | undefined) {
@@ -88,6 +144,7 @@ export function isModelAvailableInConnectedProviders(
 
 export function getConnectedProviderSnapshotChange(input: {
   baseUrl?: string | null;
+  openworkToken?: string | null;
   directory?: string | null;
 }) {
   return connectedProviderSnapshotChanges.get(connectedProviderSnapshotKey(input)) ?? null;
@@ -96,6 +153,7 @@ export function getConnectedProviderSnapshotChange(input: {
 function recordConnectedProviderSnapshot(
   input: {
     baseUrl?: string | null;
+    openworkToken?: string | null;
     directory?: string | null;
   },
   value: ProviderListResponse,
@@ -113,6 +171,7 @@ function recordConnectedProviderSnapshot(
 
 function connectedProviderSnapshotKey(input: {
   baseUrl?: string | null;
+  openworkToken?: string | null;
   directory?: string | null;
 }) {
   return JSON.stringify(providerListQueryKey(input));
@@ -167,6 +226,7 @@ export function ensureProviderListQuery(
   input: {
     client: Client;
     baseUrl?: string | null;
+    openworkToken?: string | null;
     directory?: string | null;
     force?: boolean;
   },
@@ -191,6 +251,7 @@ export function ensureProviderListQuery(
 export function useProviderListQuery(input: {
   client: Client | null;
   baseUrl?: string | null;
+  openworkToken?: string | null;
   directory?: string | null;
   enabled?: boolean;
 }) {
@@ -210,6 +271,7 @@ export function useProviderListQuery(input: {
       return fetchProviderList({
         client: input.client,
         baseUrl: input.baseUrl,
+        openworkToken: input.openworkToken,
         directory: input.directory,
       });
     },

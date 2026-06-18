@@ -1,11 +1,11 @@
 import { and, desc, eq, inArray, isNotNull, isNull, or } from "@openwork-ee/den-db/drizzle"
 import {
   AuthUserTable,
-  InvitationTable,
   LlmProviderAccessTable,
   LlmProviderModelTable,
   LlmProviderTable,
   MemberTable,
+  InvitationTable,
   TeamTable,
 } from "@openwork-ee/den-db/schema"
 import { createDenTypeId, normalizeDenTypeId } from "@openwork-ee/utils/typeid"
@@ -32,16 +32,15 @@ type LlmProviderAccessId = typeof LlmProviderAccessTable.$inferSelect.id
 type MemberId = typeof MemberTable.$inferSelect.id
 type TeamId = typeof TeamTable.$inferSelect.id
 type LlmProviderRow = typeof LlmProviderTable.$inferSelect
+const OPENAI_AUTH_ISSUER = "https://auth.openai.com"
+const OPENAI_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+const OPENAI_DEVICE_REDIRECT_URI = `${OPENAI_AUTH_ISSUER}/deviceauth/callback`
+const OPENAI_DEVICE_POLLING_SAFETY_MARGIN_MS = 3000
 
 type RouteFailure = {
   status: number
   error: string
   message?: string
-}
-
-function getInvitedMemberName(email: string) {
-  const [localPart, domain = "invited"] = email.split("@")
-  return `${localPart} ${domain.split(".")[0] ?? "invited"}`.trim()
 }
 
 const providerCatalogParamsSchema = z.object({
@@ -57,11 +56,13 @@ const llmProviderListQuerySchema = z.object({
 const llmProviderWriteSchema = z.object({
   name: z.string().trim().min(1).max(255),
   source: z.enum(["models_dev", "custom"]),
+  credentialKind: z.enum(["api_key", "opencode_oauth"]).optional().default("api_key"),
   providerId: z.string().trim().min(1).max(255).optional(),
   modelIds: z.array(z.string().trim().min(1).max(255)).min(1).optional(),
   customConfigText: z.string().trim().min(1).optional(),
   customConfig: z.unknown().optional(),
   apiKey: z.string().trim().max(65535).optional(),
+  opencodeAuth: z.string().trim().max(65535).optional(),
   memberIds: z.array(denTypeIdSchema("member")).max(500).optional().default([]),
   teamIds: z.array(denTypeIdSchema("team")).max(500).optional().default([]),
 }).superRefine((value, ctx) => {
@@ -89,6 +90,16 @@ const llmProviderWriteSchema = z.object({
       path: ["customConfigText"],
       message: "Paste a custom provider config.",
     })
+  }
+
+  if (value.credentialKind === "opencode_oauth") {
+    if (value.source !== "models_dev" || !isOpencodeOauthProviderAllowed(value.providerId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["credentialKind"],
+        message: "OpenCode OAuth credentials can only be used with the OpenAI catalog provider.",
+      })
+    }
   }
 })
 
@@ -118,6 +129,24 @@ const conflictSchema = z.object({
   message: z.string().optional(),
 }).meta({ ref: "ConflictError" })
 
+const openAiOauthStartResponseSchema = z.object({
+  verificationUrl: z.string(),
+  userCode: z.string(),
+  deviceAuthId: z.string(),
+  intervalMs: z.number(),
+}).meta({ ref: "OpenAiOauthStartResponse" })
+
+const openAiOauthCompleteSchema = z.object({
+  deviceAuthId: z.string().trim().min(1),
+  userCode: z.string().trim().min(1),
+})
+
+const openAiOauthCompleteResponseSchema = z.object({
+  opencodeAuth: z.string(),
+  accountId: z.string().nullable(),
+  expires: z.number(),
+}).meta({ ref: "OpenAiOauthCompleteResponse" })
+
 function createFailure(status: number, error: string, message?: string): RouteFailure {
   return { status, error, message }
 }
@@ -126,8 +155,135 @@ function isRouteFailure(value: unknown): value is RouteFailure {
   return typeof value === "object" && value !== null && "status" in value && "error" in value
 }
 
+function parseJwtClaims(token: string): Record<string, unknown> | null {
+  const parts = token.split(".")
+  if (parts.length !== 3 || !parts[1]) return null
+  try {
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString()) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function extractOpenAiAccountId(tokens: { id_token?: string; access_token?: string }) {
+  const claims = tokens.id_token ? parseJwtClaims(tokens.id_token) : tokens.access_token ? parseJwtClaims(tokens.access_token) : null
+  if (!claims) return null
+  const apiAuth = claims["https://api.openai.com/auth"]
+  if (typeof claims.chatgpt_account_id === "string") return claims.chatgpt_account_id
+  if (apiAuth && typeof apiAuth === "object" && !Array.isArray(apiAuth) && typeof (apiAuth as Record<string, unknown>).chatgpt_account_id === "string") {
+    return (apiAuth as Record<string, string>).chatgpt_account_id
+  }
+  const organizations = claims.organizations
+  if (Array.isArray(organizations)) {
+    const first = organizations.find((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && !Array.isArray(entry))
+    if (typeof first?.id === "string") return first.id
+  }
+  return null
+}
+
+export async function startOpenAiDeviceAuth() {
+  const response = await fetch(`${OPENAI_AUTH_ISSUER}/api/accounts/deviceauth/usercode`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "opencode/den",
+    },
+    body: JSON.stringify({ client_id: OPENAI_CODEX_CLIENT_ID }),
+  })
+  if (!response.ok) {
+    throw createFailure(502, "openai_oauth_start_failed", `OpenAI device authorization failed with ${response.status}.`)
+  }
+  const data = await response.json() as { device_auth_id?: unknown; user_code?: unknown; interval?: unknown }
+  if (typeof data.device_auth_id !== "string" || typeof data.user_code !== "string") {
+    throw createFailure(502, "openai_oauth_start_failed", "OpenAI device authorization response was incomplete.")
+  }
+  const interval = Math.max(Number.parseInt(String(data.interval ?? "5"), 10) || 5, 1) * 1000
+  return {
+    verificationUrl: `${OPENAI_AUTH_ISSUER}/codex/device`,
+    userCode: data.user_code,
+    deviceAuthId: data.device_auth_id,
+    intervalMs: interval + OPENAI_DEVICE_POLLING_SAFETY_MARGIN_MS,
+  }
+}
+
+export async function completeOpenAiDeviceAuth(input: { deviceAuthId: string; userCode: string }) {
+  const deviceResponse = await fetch(`${OPENAI_AUTH_ISSUER}/api/accounts/deviceauth/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "opencode/den",
+    },
+    body: JSON.stringify({
+      device_auth_id: input.deviceAuthId,
+      user_code: input.userCode,
+    }),
+  })
+
+  if (deviceResponse.status === 403) {
+    throw createFailure(409, "openai_oauth_pending", "OpenAI authorization is not complete yet.")
+  }
+  if (deviceResponse.status === 404) {
+    throw createFailure(410, "openai_oauth_expired", "OpenAI authorization expired. Restart the device authorization flow.")
+  }
+  if (!deviceResponse.ok) {
+    throw createFailure(502, "openai_oauth_complete_failed", `OpenAI device authorization failed with ${deviceResponse.status}.`)
+  }
+  const deviceData = await deviceResponse.json() as { authorization_code?: unknown; code_verifier?: unknown }
+  if (typeof deviceData.authorization_code !== "string" || typeof deviceData.code_verifier !== "string") {
+    throw createFailure(502, "openai_oauth_complete_failed", "OpenAI device token response was incomplete.")
+  }
+
+  const tokenResponse = await fetch(`${OPENAI_AUTH_ISSUER}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: deviceData.authorization_code,
+      redirect_uri: OPENAI_DEVICE_REDIRECT_URI,
+      client_id: OPENAI_CODEX_CLIENT_ID,
+      code_verifier: deviceData.code_verifier,
+    }).toString(),
+  })
+  if (!tokenResponse.ok) {
+    throw createFailure(502, "openai_oauth_complete_failed", `OpenAI token exchange failed with ${tokenResponse.status}.`)
+  }
+  const tokens = await tokenResponse.json() as { id_token?: string; access_token?: string; refresh_token?: string; expires_in?: number }
+  if (!tokens.access_token || !tokens.refresh_token) {
+    throw createFailure(502, "openai_oauth_complete_failed", "OpenAI token response did not include OAuth tokens.")
+  }
+  const expires = Date.now() + (tokens.expires_in ?? 3600) * 1000
+  const accountId = extractOpenAiAccountId(tokens)
+  return {
+    opencodeAuth: JSON.stringify({
+      type: "oauth",
+      refresh: tokens.refresh_token,
+      access: tokens.access_token,
+      expires,
+      ...(accountId ? { accountId } : {}),
+    }),
+    accountId,
+    expires,
+  }
+}
+
 function isOrganizationAdmin(payload: { currentMember: { isOwner: boolean; role: string } }) {
   return payload.currentMember.isOwner || memberHasRole(payload.currentMember.role, "admin")
+}
+
+export function isOpencodeOauthProviderAllowed(providerId: string | undefined | null) {
+  return providerId?.trim().toLowerCase() === "openai"
+}
+
+export function canUseOpenAiOAuthCredentialFlow(payload: { currentMember: { isOwner: boolean; role: string } }) {
+  return isOrganizationAdmin(payload)
+}
+
+function requiresOpenAiOAuthCredentialPermission(input: { credentialKind?: string; opencodeAuth?: string }) {
+  return input.credentialKind === "opencode_oauth" || Boolean(input.opencodeAuth?.trim())
+}
+
+export function canImportLlmProviderCredential(payload: { currentMember: { isOwner: boolean; role: string } }) {
+  return isOrganizationAdmin(payload)
 }
 
 function canManageLlmProvider(
@@ -158,6 +314,80 @@ function parseLlmProviderId(value: string) {
 
 function parseLlmProviderAccessId(value: string) {
   return normalizeDenTypeId("llmProviderAccess", value)
+}
+
+export function getCredentialFlags(provider: Pick<LlmProviderRow, "credentialKind" | "apiKey" | "opencodeAuth">) {
+  const hasApiKey = Boolean(provider.apiKey && provider.apiKey.trim().length > 0)
+  const hasOpencodeAuth = Boolean(provider.opencodeAuth && provider.opencodeAuth.trim().length > 0)
+  return {
+    hasApiKey,
+    hasOpencodeAuth,
+    hasCredential: provider.credentialKind === "opencode_oauth" ? hasOpencodeAuth : hasApiKey,
+  }
+}
+
+export function redactLlmProviderCredentials<T extends { apiKey?: unknown; opencodeAuth?: unknown }>(provider: T): Omit<T, "apiKey" | "opencodeAuth"> & { apiKey: undefined; opencodeAuth: undefined } {
+  return {
+    ...provider,
+    apiKey: undefined,
+    opencodeAuth: undefined,
+  }
+}
+
+export function serializeLlmProviderAccessUser(input: {
+  user: { id: string | null; name: string | null; email: string | null; image: string | null } | null
+  invitation: { email: string | null } | null
+}) {
+  return input.user?.id
+    ? input.user
+    : {
+        id: null,
+        name: null,
+        email: input.invitation?.email ?? null,
+        image: null,
+      }
+}
+
+function buildLlmProviderCredentialPayload(provider: LlmProviderRow) {
+  return {
+    ...redactLlmProviderCredentials(provider),
+    ...getCredentialFlags(provider),
+    apiKey: provider.credentialKind === "api_key" ? provider.apiKey : undefined,
+    opencodeAuth: provider.credentialKind === "opencode_oauth" ? provider.opencodeAuth : undefined,
+  }
+}
+
+function normalizeOpencodeAuth(value: string | undefined) {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("OpenCode OAuth auth must be a JSON object.")
+    }
+    const auth = parsed as Record<string, unknown>
+    if (auth.type !== "oauth") {
+      throw new Error('OpenCode OAuth auth must include "type": "oauth".')
+    }
+    if (typeof auth.access !== "string" || !auth.access.trim()) {
+      throw new Error("OpenCode OAuth auth must include an access token.")
+    }
+    if (typeof auth.refresh !== "string" || !auth.refresh.trim()) {
+      throw new Error("OpenCode OAuth auth must include a refresh token.")
+    }
+    if (typeof auth.expires !== "number" || !Number.isFinite(auth.expires) || auth.expires < 0) {
+      throw new Error("OpenCode OAuth auth must include a non-negative numeric expires value.")
+    }
+  } catch (error) {
+    throw createFailure(
+      400,
+      "invalid_opencode_auth",
+      error instanceof Error ? error.message : "OpenCode OAuth auth must be valid JSON.",
+    )
+  }
+
+  return trimmed
 }
 
 function parseMemberId(value: string) {
@@ -200,7 +430,7 @@ async function listAccessibleProviderAccess(input: {
     .where(accessWhere)
 }
 
-async function resolveMemberIds(input: {
+export async function resolveMemberIds(input: {
   organizationId: typeof LlmProviderTable.$inferSelect.organizationId
   values: string[]
 }) {
@@ -220,7 +450,11 @@ async function resolveMemberIds(input: {
   const rows = await db
     .select({ id: MemberTable.id })
     .from(MemberTable)
-    .where(and(eq(MemberTable.organizationId, input.organizationId), inArray(MemberTable.id, memberIds), isNull(MemberTable.removedAt)))
+    .where(and(
+      eq(MemberTable.organizationId, input.organizationId),
+      inArray(MemberTable.id, memberIds),
+      isNull(MemberTable.removedAt),
+    ))
 
   if (rows.length !== memberIds.length) {
     throw createFailure(404, "member_not_found")
@@ -258,7 +492,11 @@ async function resolveTeamIds(input: {
   return teamIds
 }
 
-async function normalizeLlmProviderInput(input: z.infer<typeof llmProviderWriteSchema>) {
+export async function normalizeLlmProviderInput(input: z.infer<typeof llmProviderWriteSchema>) {
+  const credentialKind = input.credentialKind
+  const apiKey = credentialKind === "api_key" ? input.apiKey?.trim() || null : null
+  const opencodeAuth = credentialKind === "opencode_oauth" ? normalizeOpencodeAuth(input.opencodeAuth) : null
+
   if (input.source === "models_dev") {
     const provider = await getModelsDevProvider(input.providerId ?? "")
     if (!provider) {
@@ -275,10 +513,9 @@ async function normalizeLlmProviderInput(input: z.infer<typeof llmProviderWriteS
       return model
     })
 
-    const apiKey = input.apiKey?.trim() || null
-
     return {
       source: input.source,
+      credentialKind,
       providerId: provider.id,
       name: input.name,
       providerConfig: provider.config,
@@ -288,6 +525,7 @@ async function normalizeLlmProviderInput(input: z.infer<typeof llmProviderWriteS
         config: model.config,
       })),
       apiKey,
+      opencodeAuth,
     }
   }
 
@@ -299,11 +537,13 @@ async function normalizeLlmProviderInput(input: z.infer<typeof llmProviderWriteS
 
     return {
       source: input.source,
+      credentialKind,
       providerId: customProvider.providerId,
       name: input.name,
       providerConfig: customProvider.providerConfig,
       models: customProvider.models,
-      apiKey: input.apiKey?.trim() || null,
+      apiKey,
+      opencodeAuth,
     }
   } catch (error) {
     if (error instanceof CustomProviderConfigError) {
@@ -314,7 +554,7 @@ async function normalizeLlmProviderInput(input: z.infer<typeof llmProviderWriteS
   }
 }
 
-async function loadLlmProviders(input: {
+export async function loadLlmProviders(input: {
   organizationId: typeof LlmProviderTable.$inferSelect.organizationId
   currentMemberId: MemberId
   memberTeams: Array<{ id: TeamId }>
@@ -370,6 +610,10 @@ async function loadLlmProviders(input: {
       member: {
         id: MemberTable.id,
         role: MemberTable.role,
+        removedAt: MemberTable.removedAt,
+      },
+      invitation: {
+        email: InvitationTable.email,
       },
       user: {
         id: AuthUserTable.id,
@@ -377,15 +621,16 @@ async function loadLlmProviders(input: {
         email: AuthUserTable.email,
         image: AuthUserTable.image,
       },
-      invitation: {
-        email: InvitationTable.email,
-      },
     })
     .from(LlmProviderAccessTable)
     .innerJoin(MemberTable, eq(LlmProviderAccessTable.orgMembershipId, MemberTable.id))
     .leftJoin(AuthUserTable, eq(MemberTable.userId, AuthUserTable.id))
     .leftJoin(InvitationTable, eq(MemberTable.inviteId, InvitationTable.id))
-    .where(and(inArray(LlmProviderAccessTable.llmProviderId, providerIds), isNotNull(LlmProviderAccessTable.orgMembershipId), isNull(MemberTable.removedAt)))
+    .where(and(
+      inArray(LlmProviderAccessTable.llmProviderId, providerIds),
+      isNotNull(LlmProviderAccessTable.orgMembershipId),
+      isNull(MemberTable.removedAt),
+    ))
 
   const teamAccessRows = await db
     .select({
@@ -414,6 +659,7 @@ async function loadLlmProviders(input: {
 
   const memberAccessByProviderId = new Map<LlmProviderId, typeof memberAccessRows>()
   for (const row of memberAccessRows) {
+    if (row.member.removedAt) continue
     const existing = memberAccessByProviderId.get(row.access.llmProviderId) ?? []
     existing.push(row)
     memberAccessByProviderId.set(row.access.llmProviderId, existing)
@@ -440,7 +686,7 @@ async function loadLlmProviders(input: {
 
   return providers.map((provider) => ({
     ...provider,
-    hasApiKey: Boolean(provider.apiKey && provider.apiKey.trim().length > 0),
+    ...getCredentialFlags(provider),
     models: (modelsByProviderId.get(provider.id) ?? [])
       .map((model) => ({
         id: model.modelId,
@@ -450,21 +696,13 @@ async function loadLlmProviders(input: {
       }))
       .sort((left, right) => left.name.localeCompare(right.name)),
     access: {
-      members: (memberAccessByProviderId.get(provider.id) ?? []).map((row) => {
-        const email = row.user?.email ?? row.invitation?.email ?? "invited@example.com"
-        return {
-          id: row.access.id,
-          orgMembershipId: row.member.id,
-          role: row.member.role,
-          user: {
-            id: row.user?.id ?? row.member.id,
-            name: row.user?.name ?? getInvitedMemberName(email),
-            email,
-            image: row.user?.image ?? null,
-          },
-          createdAt: row.access.createdAt,
-        }
-      }),
+      members: (memberAccessByProviderId.get(provider.id) ?? []).map((row) => ({
+        id: row.access.id,
+        orgMembershipId: row.member.id,
+        role: row.member.role,
+        user: serializeLlmProviderAccessUser(row),
+        createdAt: row.access.createdAt,
+      })),
       teams: (teamAccessByProviderId.get(provider.id) ?? []).map((row) => ({
         id: row.access.id,
         teamId: row.team.id,
@@ -478,6 +716,67 @@ async function loadLlmProviders(input: {
 }
 
 export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVariables & Partial<MemberTeamsContext> }>(app: Hono<T>) {
+  app.post(
+    "/v1/llm-providers/openai-oauth/start",
+    describeRoute({
+      tags: ["LLM Providers"],
+      summary: "Start OpenAI OAuth device flow",
+      description: "Starts the same OpenAI/ChatGPT device auth flow used by OpenCode and returns the user code.",
+      responses: {
+        200: jsonResponse("OpenAI OAuth device flow started successfully.", openAiOauthStartResponseSchema),
+        401: jsonResponse("The caller must be signed in to connect OpenAI.", unauthorizedSchema),
+        403: jsonResponse("Only organization admins can connect OpenAI OAuth credentials.", forbiddenSchema),
+        502: jsonResponse("OpenAI OAuth could not be started.", conflictSchema),
+      },
+    }),
+    orgMemberRoute(),
+    async (c) => {
+      const payload = c.get("organizationContext")
+      if (!canUseOpenAiOAuthCredentialFlow(payload)) {
+        return c.json({ error: "forbidden", message: "Only organization admins can connect OpenAI OAuth credentials." }, 403)
+      }
+
+      try {
+        return c.json(await startOpenAiDeviceAuth())
+      } catch (error) {
+        if (isRouteFailure(error)) return c.json({ error: error.error, message: error.message }, { status: error.status as 409 | 502 })
+        throw error
+      }
+    },
+  )
+
+  app.post(
+    "/v1/llm-providers/openai-oauth/complete",
+    describeRoute({
+      tags: ["LLM Providers"],
+      summary: "Complete OpenAI OAuth device flow",
+      description: "Completes OpenAI device auth and returns an OpenCode-native OAuth auth object serialized as JSON.",
+      responses: {
+        200: jsonResponse("OpenAI OAuth completed successfully.", openAiOauthCompleteResponseSchema),
+        401: jsonResponse("The caller must be signed in to complete OpenAI auth.", unauthorizedSchema),
+        403: jsonResponse("Only organization admins can connect OpenAI OAuth credentials.", forbiddenSchema),
+        409: jsonResponse("OpenAI authorization is still pending.", conflictSchema),
+        502: jsonResponse("OpenAI OAuth could not be completed.", conflictSchema),
+      },
+    }),
+    orgMemberRoute(),
+    jsonValidator(openAiOauthCompleteSchema),
+    async (c) => {
+      const payload = c.get("organizationContext")
+      if (!canUseOpenAiOAuthCredentialFlow(payload)) {
+        return c.json({ error: "forbidden", message: "Only organization admins can connect OpenAI OAuth credentials." }, 403)
+      }
+
+      const input = c.req.valid("json")
+      try {
+        return c.json(await completeOpenAiDeviceAuth(input))
+      } catch (error) {
+        if (isRouteFailure(error)) return c.json({ error: error.error, message: error.message }, { status: error.status as 409 | 502 })
+        throw error
+      }
+    },
+  )
+
   app.get(
     "/v1/llm-provider-catalog",
     describeRoute({
@@ -580,8 +879,7 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
 
       return c.json({
         llmProviders: providers.map((provider) => ({
-          ...provider,
-          apiKey: undefined,
+          ...redactLlmProviderCredentials(provider),
           canManage: canManageLlmProvider(payload, provider),
         })),
       })
@@ -607,7 +905,6 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
     resolveMemberTeamsMiddleware,
     async (c) => {
       const payload = c.get("organizationContext")
-      const memberTeams = c.get("memberTeams") ?? []
       const params = c.req.valid("param")
 
       let llmProviderId: LlmProviderId
@@ -628,6 +925,7 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
         return c.json({ error: "llm_provider_not_found" }, 404)
       }
 
+      const memberTeams = c.get("memberTeams") ?? []
       const accessible = await canAccessLlmProvider({
         organizationId: payload.organization.id,
         llmProviderId,
@@ -649,7 +947,72 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
 
       return c.json({
         llmProvider: {
-          ...provider,
+          ...redactLlmProviderCredentials(provider),
+          ...getCredentialFlags(provider),
+          models: models
+            .map((model) => ({
+              id: model.modelId,
+              name: model.name,
+              config: model.modelConfig,
+              createdAt: model.createdAt,
+            }))
+            .sort((left, right) => left.name.localeCompare(right.name)),
+        },
+      })
+    },
+  )
+
+  app.get(
+    "/v1/llm-providers/:llmProviderId/import-credential",
+    describeRoute({
+      tags: ["LLM Providers"],
+      summary: "Get LLM provider import credential",
+      description: "Returns a stored organization LLM provider credential for explicit import into a managed OpenCode client.",
+      responses: {
+        200: jsonResponse("Provider import credential returned successfully.", llmProviderResponseSchema),
+        400: jsonResponse("The provider import path parameters were invalid.", invalidRequestSchema),
+        401: jsonResponse("The caller must be signed in to import an organization LLM provider credential.", unauthorizedSchema),
+        403: jsonResponse("Only members who can manage this provider can import its credential.", forbiddenSchema),
+        404: jsonResponse("The provider could not be found.", notFoundSchema),
+      },
+    }),
+    orgMemberRoute(),
+    paramValidator(orgLlmProviderParamsSchema),
+    resolveMemberTeamsMiddleware,
+    async (c) => {
+      const payload = c.get("organizationContext")
+      const params = c.req.valid("param")
+
+      let llmProviderId: LlmProviderId
+      try {
+        llmProviderId = parseLlmProviderId(params.llmProviderId)
+      } catch {
+        return c.json({ error: "llm_provider_not_found" }, 404)
+      }
+
+      const providerRows = await db
+        .select()
+        .from(LlmProviderTable)
+        .where(and(eq(LlmProviderTable.id, llmProviderId), eq(LlmProviderTable.organizationId, payload.organization.id)))
+        .limit(1)
+
+      const provider = providerRows[0]
+      if (!provider) {
+        return c.json({ error: "llm_provider_not_found" }, 404)
+      }
+
+      if (!canImportLlmProviderCredential(payload)) {
+        return c.json({ error: "forbidden", message: "Only organization owners and admins can import provider credentials." }, 403)
+      }
+
+      const models = await db
+        .select()
+        .from(LlmProviderModelTable)
+        .where(eq(LlmProviderModelTable.llmProviderId, llmProviderId))
+
+      return c.json({
+        llmProvider: {
+          ...buildLlmProviderCredentialPayload(provider),
           models: models
             .map((model) => ({
               id: model.modelId,
@@ -684,6 +1047,9 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
 
       try {
         const normalized = await normalizeLlmProviderInput(input)
+        if (requiresOpenAiOAuthCredentialPermission(input) && !canUseOpenAiOAuthCredentialFlow(payload)) {
+          return c.json({ error: "forbidden", message: "Only organization admins can connect OpenAI OAuth credentials." }, 403)
+        }
         const memberIds = await resolveMemberIds({
           organizationId: payload.organization.id,
           values: input.memberIds,
@@ -703,10 +1069,12 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
             organizationId: payload.organization.id,
             createdByOrgMembershipId: payload.currentMember.id,
             source: normalized.source,
+            credentialKind: normalized.credentialKind,
             providerId: normalized.providerId,
             name: normalized.name,
             providerConfig: normalized.providerConfig,
             apiKey: normalized.apiKey,
+            opencodeAuth: normalized.opencodeAuth,
             createdAt: now,
             updatedAt: now,
           })
@@ -752,10 +1120,13 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
             organizationId: payload.organization.id,
             createdByOrgMembershipId: payload.currentMember.id,
             source: normalized.source,
+            credentialKind: normalized.credentialKind,
             providerId: normalized.providerId,
             name: normalized.name,
             providerConfig: normalized.providerConfig,
             hasApiKey: Boolean(normalized.apiKey),
+            hasOpencodeAuth: Boolean(normalized.opencodeAuth),
+            hasCredential: normalized.credentialKind === "opencode_oauth" ? Boolean(normalized.opencodeAuth) : Boolean(normalized.apiKey),
             createdAt: now,
             updatedAt: now,
           },
@@ -829,6 +1200,9 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
 
       try {
         const normalized = await normalizeLlmProviderInput(input)
+        if (requiresOpenAiOAuthCredentialPermission(input) && !canUseOpenAiOAuthCredentialFlow(payload)) {
+          return c.json({ error: "forbidden", message: "Only organization admins can connect OpenAI OAuth credentials." }, 403)
+        }
         const memberIds = await resolveMemberIds({
           organizationId: payload.organization.id,
           values: input.memberIds,
@@ -845,10 +1219,16 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
             .update(LlmProviderTable)
             .set({
               source: normalized.source,
+              credentialKind: normalized.credentialKind,
               providerId: normalized.providerId,
               name: normalized.name,
               providerConfig: normalized.providerConfig,
-              apiKey: input.apiKey === undefined ? provider.apiKey : normalized.apiKey,
+              apiKey: normalized.credentialKind === "api_key"
+                ? (input.apiKey === undefined ? provider.apiKey : normalized.apiKey)
+                : null,
+              opencodeAuth: normalized.credentialKind === "opencode_oauth"
+                ? (input.opencodeAuth === undefined ? provider.opencodeAuth : normalized.opencodeAuth)
+                : null,
               updatedAt,
             })
             .where(eq(LlmProviderTable.id, provider.id))
@@ -893,12 +1273,21 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
 
         return c.json({
           llmProvider: {
-            ...provider,
+            ...redactLlmProviderCredentials(provider),
             source: normalized.source,
             providerId: normalized.providerId,
             name: normalized.name,
             providerConfig: normalized.providerConfig,
-            hasApiKey: input.apiKey === undefined ? Boolean(provider.apiKey) : Boolean(normalized.apiKey),
+            credentialKind: normalized.credentialKind,
+            hasApiKey: normalized.credentialKind === "api_key"
+              ? (input.apiKey === undefined ? Boolean(provider.apiKey) : Boolean(normalized.apiKey))
+              : false,
+            hasOpencodeAuth: normalized.credentialKind === "opencode_oauth"
+              ? (input.opencodeAuth === undefined ? Boolean(provider.opencodeAuth) : Boolean(normalized.opencodeAuth))
+              : false,
+            hasCredential: normalized.credentialKind === "opencode_oauth"
+              ? (input.opencodeAuth === undefined ? Boolean(provider.opencodeAuth) : Boolean(normalized.opencodeAuth))
+              : (input.apiKey === undefined ? Boolean(provider.apiKey) : Boolean(normalized.apiKey)),
             updatedAt,
           },
         })

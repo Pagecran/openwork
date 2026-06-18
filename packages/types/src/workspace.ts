@@ -33,6 +33,10 @@ export type WorkspaceWire = {
   openworkHostToken?: string | null;
   openworkWorkspaceId?: string | null;
   openworkWorkspaceName?: string | null;
+  openworkDenBaseUrl?: string | null;
+  openworkDenApiBaseUrl?: string | null;
+  openworkDenOrgId?: string | null;
+  openworkDenWorkerId?: string | null;
   /**
    * Vocabulary differs per producer today ("docker" | "microsandbox" on the
    * desktop, "none" | "docker" | "container" in openwork-server), so the wire

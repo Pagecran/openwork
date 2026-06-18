@@ -320,8 +320,8 @@ function CloudWorkerListItem({ openingWorkerId, worker, onOpenWorker }: CloudWor
         variant="outline"
         size="sm"
         onClick={() => void onOpenWorker(worker.workerId, worker.workerName)}
-        disabled={[openingWorkerId !== null, !status.canOpen].some(Boolean)}
-        title={!status.canOpen ? t("den.worker_not_ready_title") : undefined}
+        disabled={[openingWorkerId !== null, !status.canOpen, !worker.isMine].some(Boolean)}
+        title={!worker.isMine ? "Only the worker owner can open connection tokens." : !status.canOpen ? t("den.worker_not_ready_title") : undefined}
       >
         {openingWorkerId === worker.workerId ? t("den.opening") : t("den.open")}
       </Button>
@@ -332,13 +332,14 @@ function CloudWorkerListItem({ openingWorkerId, worker, onOpenWorker }: CloudWor
 interface CloudProviderListItemProps {
   actionId: string | null;
   actionKind: ResourceActionKind | null;
+  canManageProviders: boolean;
   row: CloudProviderRow;
   onImport: (cloudProviderId: string, providerName: string) => void | Promise<void>;
   onRemove?: (cloudProviderId: string, providerName: string) => void | Promise<void>;
   onSync: (cloudProviderId: string, providerName: string) => void | Promise<void>;
 }
 
-function CloudProviderListItem({ actionId, actionKind, row, onImport, onRemove, onSync }: CloudProviderListItemProps) {
+function CloudProviderListItem({ actionId, actionKind, canManageProviders, row, onImport, onRemove, onSync }: CloudProviderListItemProps) {
   const actionBusy = actionId === row.cloudProviderId;
   const actionLabel = !actionBusy
     ? null
@@ -391,7 +392,7 @@ function CloudProviderListItem({ actionId, actionKind, row, onImport, onRemove, 
             variant="outline"
             size="sm"
             onClick={() => void onSync(row.cloudProviderId, row.name)}
-            disabled={actionId !== null}
+            disabled={actionId !== null || !canManageProviders}
           >
             {actionBusy && actionKind === "sync" ? t("den.syncing") : t("den.sync")}
           </Button>
@@ -401,7 +402,7 @@ function CloudProviderListItem({ actionId, actionKind, row, onImport, onRemove, 
             variant="outline"
             size="sm"
             onClick={() => void onImport(row.cloudProviderId, row.name)}
-            disabled={actionId !== null}
+            disabled={actionId !== null || !canManageProviders}
           >
             {actionBusy ? actionLabel : t("den.import_provider")}
           </Button>
@@ -803,6 +804,7 @@ export interface CloudProvidersSectionProps {
   actionId: string | null;
   actionKind: ResourceActionKind | null;
   busy: boolean;
+  canManageProviders: boolean;
   rows: CloudProviderRow[];
   onImport: (cloudProviderId: string, providerName: string) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
@@ -815,6 +817,7 @@ export function CloudProvidersSection({
   actionId,
   actionKind,
   busy,
+  canManageProviders,
   rows,
   onImport,
   onRefresh,
@@ -888,6 +891,7 @@ export function CloudProvidersSection({
                           key={row.key}
                           actionId={actionId}
                           actionKind={actionKind}
+                          canManageProviders={canManageProviders}
                           row={row}
                           onImport={onImport}
                           onRemove={onRemove}
