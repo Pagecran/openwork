@@ -23,6 +23,11 @@ import { registerMigrationIpc } from "./migration.mjs";
 import { createRuntimeManager } from "./runtime.mjs";
 import { registerUpdaterIpc } from "./updater.mjs";
 import {
+  isDesktopFetchAllowedForDenBootstrap,
+  isDesktopFetchAllowedForWorkspaces,
+  openworkWorkspaceDisplayName,
+} from "./remote-workspace.mjs";
+import {
   checkComputerUsePermissions,
   getComputerUseMcpCommand,
   listRunningApps,
@@ -46,6 +51,7 @@ const APP_IDENTIFIER = isDevMode ? DEV_APP_IDENTIFIER : TAURI_APP_IDENTIFIER;
 const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/different-ai/openwork/releases/latest/download";
 const RELEASE_PAGE_URL = "https://github.com/different-ai/openwork/releases/latest";
 const DOCS_PAGE_URL = "https://openworklabs.com/docs";
+const PRODUCT_DESKTOP_FETCH_ORIGINS = new Set(["https://api.openai.com", "https://github.com"]);
 const applicationMenu = createApplicationMenu({
   appName: APP_NAME,
   docsUrl: DOCS_PAGE_URL,
@@ -57,7 +63,6 @@ const uiControlServer = createUiControlServer({
   appIdentifier: APP_IDENTIFIER,
   getWindow: () => createMainWindow(),
 });
-
 const terminalProcesses = new Map();
 let nextTerminalId = 1;
 
@@ -1271,11 +1276,26 @@ const desktopCommandHandlers = {
       const url = String(args[0] ?? "").trim();
       const init = args[1] ?? {};
       if (!url) throw new Error("URL is required.");
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("Desktop fetch only supports HTTP(S) URLs.");
+      }
+      const state = await workspaceStore.readWorkspaceState();
+      const bootstrap = await workspaceStore.getDesktopBootstrapConfig();
+      if (!isDesktopFetchAllowedForWorkspaces(parsed.toString(), state.workspaces)
+        && !isDesktopFetchAllowedForDenBootstrap(parsed.toString(), bootstrap)
+        && !PRODUCT_DESKTOP_FETCH_ORIGINS.has(parsed.origin)) {
+        throw new Error("Desktop fetch is limited to configured remote workspace origins.");
+      }
       const timeoutMs = Number(init.timeoutMs);
+      const headers = init.headers && typeof init.headers === "object" ? init.headers : undefined;
+      const method = typeof init.method === "string" ? init.method : "GET";
+      const hasBody = typeof init.body === "string";
       const response = await fetch(url, {
-        method: typeof init.method === "string" ? init.method : undefined,
-        headers: init.headers && typeof init.headers === "object" ? init.headers : undefined,
-        body: typeof init.body === "string" ? init.body : undefined,
+        method,
+        redirect: "manual",
+        headers,
+        body: hasBody ? init.body : undefined,
         signal: Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
       });
       return {
